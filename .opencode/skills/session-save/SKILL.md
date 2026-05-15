@@ -34,3 +34,7 @@ Use that path to:
 
 These are human-readable markdown files meant to be reviewed and edited by
 the author before sharing.
+
+The user may also ask for other documents to be written into the session
+directory — create whatever they request. The session directory is the
+canonical home for all artifacts related to a session.

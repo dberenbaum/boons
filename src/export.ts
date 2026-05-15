@@ -50,8 +50,10 @@ export async function exportSession(opts: ExportOptions): Promise<ExportResult> 
     tool: "opencode",
     author: author.name,
     email: author.email,
+    branch,
     created: sessionInfo.time.created,
     updated: sessionInfo.time.updated,
+    messageCount: messages.length,
     participants: [...participants],
   }
   await Bun.write(

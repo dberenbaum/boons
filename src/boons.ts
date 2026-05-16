@@ -1,5 +1,6 @@
 import * as path from "path"
 import * as fs from "fs"
+import * as os from "os"
 import * as readline from "node:readline"
 import { Glob } from "bun"
 import { exportSession } from "./export"
@@ -49,7 +50,8 @@ Usage:
   boons export [--session-id <id>] [--json]     Export session to .boons/
   boons ls [--branch <name>] [--json]            List saved sessions
   boons ls --remote [--branch <name>] [--json]   List remote sessions
-  boons init [<provider-flags>]                  Install tools + skills + config
+  boons init [<provider-flags>]                  Configure cloud remote for repo
+  boons install <toolname>                       Install tools + skills for a tool
   boons config                                   Show current config
   boons push [--session-id <id>] [--branch <b>]  Push sessions to cloud
   boons pull [--session-id <id>] [--branch <b>]  Pull sessions from cloud
@@ -240,238 +242,7 @@ async function cmdLsRemote(args: Record<string, string>) {
 
 async function cmdInit(args: Record<string, string>) {
   const cwd = process.cwd()
-  const toolsDir = path.join(cwd, ".opencode", "tools")
-  const skillsDir = path.join(cwd, ".opencode", "skills")
   const gitignorePath = path.join(cwd, ".gitignore")
-
-  const exportToolContent = `import { tool } from "@opencode-ai/plugin"
-
-export default tool({
-  description: "Export the current opencode session to a boons artifact directory (.boons/)",
-  args: {},
-  async execute(_args, context) {
-    const result = await Bun.$\`boons export --session-id \${context.sessionID} --json\`.text()
-    const parsed = JSON.parse(result.trim())
-    return \`Exported \${parsed.messageCount} messages to \${parsed.dir}\`
-  },
-})
-`
-
-  const pushToolContent = `import { tool } from "@opencode-ai/plugin"
-
-export default tool({
-  description: "Push session artifacts for the current branch to the cloud bucket",
-  args: {
-    sessionId: tool.schema.string().optional(),
-    branch: tool.schema.string().optional(),
-  },
-  async execute(args) {
-    const result = await Bun.$\`boons push \${args.branch ? ["--branch", args.branch] : []} \${args.sessionId ? ["--session-id", args.sessionId] : []}\`.text()
-    return result.trim()
-  },
-})
-`
-
-  const pullToolContent = `import { tool } from "@opencode-ai/plugin"
-
-export default tool({
-  description: "Pull session artifacts for the current branch from the cloud bucket",
-  args: {
-    sessionId: tool.schema.string().optional(),
-    branch: tool.schema.string().optional(),
-  },
-  async execute(args) {
-    const result = await Bun.$\`boons pull \${args.branch ? ["--branch", args.branch] : []} \${args.sessionId ? ["--session-id", args.sessionId] : []}\`.text()
-    return result.trim()
-  },
-})
-`
-
-  const listRemoteToolContent = `import { tool } from "@opencode-ai/plugin"
-
-export default tool({
-  description: "List remote sessions available for the current branch",
-  args: {
-    branch: tool.schema.string().optional(),
-  },
-  async execute(args) {
-    const result = await Bun.$\`boons ls --remote --json \${args.branch ? ["--branch", args.branch] : []}\`.text()
-    return result.trim()
-  },
-})
-`
-
-  const saveSkillContent = `---
-name: session-save
-description: Export opencode sessions to .boons/ artifacts directory
----
-
-## What this does
-
-Provides the \`export-session\` tool that exports the current chat session
-to the \`.boons/\` artifact directory. Each export creates a session directory
-containing:
-
-- \`raw.jsonl\` — the full message history in native opencode format
-- \`info.json\` — metadata (session name, author, branch, participants, timestamps)
-
-## When to use this
-
-Call \`export-session\` when:
-- The user asks to save or export the session
-- A significant task or feature is completed
-- Before switching branches or closing the session
-- At natural stopping points during the conversation
-
-## After export
-
-After the tool returns, it provides the path to the exported session directory.
-Use that path to:
-
-1. Generate \`summary.md\` — review the messages and write a concise summary
-   of what was accomplished, key decisions made, and what remains uncertain
-2. Optionally create \`plan.md\` — if the session included planning or design
-   discussions, document the current intent and next steps
-3. Optionally create \`decisions.md\` — if specific architectural or design
-   decisions were settled, list them with rationale
-
-These are human-readable markdown files meant to be reviewed and edited by
-the author before sharing.
-
-The user may also ask for other documents to be written into the session
-directory — create whatever they request. The session directory is the
-canonical home for all artifacts related to a session.
-`
-
-  const loadSkillContent = `---
-name: session-load
-description: Discover and read session artifacts from .boons/ directory
----
-
-## What this does
-
-Guides the agent in discovering and using saved session artifacts
-from the \`.boons/\` directory to understand prior work on a branch.
-
-## Available files per session
-
-Every saved session directory (\`.boons/<branch>/<session-id>/\`) contains:
-
-- \`info.json\` — metadata (name, author, participants, timestamps)
-- \`raw.jsonl\` — complete message history in native tool format
-
-Sessions may also have additional files generated after export:
-
-- \`summary.md\` — human-readable summary of what was accomplished,
-  key decisions made, and what remains uncertain
-- \`plan.md\` — current intent, design approach, and next steps
-- \`decisions.md\` — architectural or design decisions with rationale
-- Any other docs the author created
-
-To see which files are present for a particular session, list its directory.
-
-## When to use this
-
-Use \`boons ls\` when:
-- Starting work on a branch that may have saved sessions
-- The user asks about decisions made in prior sessions
-- Reviewing someone else's work and need context
-- Wondering whether a question was already discussed
-
-## Discovery workflow
-
-1. Run \`boons ls [--branch <name>]\` to see what sessions exist.
-   This shows session names, message counts, and which extra files
-   (summary, plan, decisions, etc.) are available.
-2. For sessions that look relevant, read \`summary.md\` first for
-   a concise overview and key decisions.
-3. If more detail is needed, read \`raw.jsonl\` — each line is a JSON
-   object with \`{info, parts}\` reflecting the chat message.
-   Search it with grep or process it line by line.
-4. Check for any other docs present in the session directory
-   (\`plan.md\`, \`decisions.md\`, etc.).
-`
-
-  const pushSkillContent = `---
-name: session-push
-description: Push session artifacts to a shared cloud bucket
----
-
-## What this does
-
-Provides the \`session-push\` tool that uploads local session artifacts
-for the current branch to the configured cloud bucket. This makes sessions
-visible to teammates who pull from the same bucket.
-
-## When to use this
-
-Call \`session-push\` when:
-- The user asks to share sessions with the team
-- Before creating or marking a PR as ready for review
-- After exporting sessions that contain important context for reviewers
-- At natural synchronization points during collaboration
-
-## Before first push
-
-Make sure your cloud bucket has **object versioning** enabled. This gives you
-the ability to recover from accidental overwrites — boons doesn't prevent
-overwriting sessions, so versioning is your safety net.
-
-## Default behavior
-
-\`session-push\` pushes all sessions for the current branch by default. Use
-the \`branch\` and \`sessionId\` arguments explicitly only when you need to
-push sessions from a different context.
-
-## Selective sharing
-
-If a session contains sensitive or irrelevant content, you may be asked to
-curate it before pushing. Remove private messages from the session's
-\`raw.jsonl\` and update \`info.json\` as needed. The push tool will upload
-whatever is in the local session directory.
-`
-
-  const pullSkillContent = `---
-name: session-pull
-description: Pull session artifacts from a shared cloud bucket
----
-
-## What this does
-
-Provides the \`session-pull\` tool that downloads session artifacts for the
-current branch from the configured cloud bucket. This is how a collaborator
-or reviewer fetches context created by others.
-
-## When to use this
-
-Call \`session-pull\` when:
-- Starting work on a branch that may have shared sessions
-- Before reviewing work on a branch — this gives context from the author
-- The user asks to see what sessions are available
-
-## Workflow
-
-1. First run \`session-list-remote\` (or \`boons ls --remote\`) to see what
-   sessions exist for the current branch
-2. Then run \`session-pull\` to fetch them into \`.boons/<branch>/\`
-3. After pulling, use \`session-load\` guidance to read them
-
-## Default behavior
-
-\`session-pull\` pulls all sessions for the current branch by default. Use the
-\`branch\` argument to pull sessions from a different branch context, or
-\`sessionId\` to pull a specific session.
-`
-
-  await Bun.$`mkdir -p ${toolsDir} ${path.join(skillsDir, "session-save")} ${path.join(skillsDir, "session-load")} ${path.join(skillsDir, "session-push")} ${path.join(skillsDir, "session-pull")}`
-  await Bun.write(path.join(toolsDir, "export-session.ts"), exportToolContent)
-  await Bun.write(path.join(toolsDir, "session-push.ts"), pushToolContent)
-  await Bun.write(path.join(toolsDir, "session-pull.ts"), pullToolContent)
-  await Bun.write(path.join(toolsDir, "session-list-remote.ts"), listRemoteToolContent)
-  await Bun.write(path.join(skillsDir, "session-save", "SKILL.md"), saveSkillContent)
-  await Bun.write(path.join(skillsDir, "session-load", "SKILL.md"), loadSkillContent)
-  await Bun.write(path.join(skillsDir, "session-push", "SKILL.md"), pushSkillContent)
-  await Bun.write(path.join(skillsDir, "session-pull", "SKILL.md"), pullSkillContent)
 
   await configureCloud(cwd, args)
 
@@ -493,9 +264,6 @@ Call \`session-pull\` when:
     fs.writeFileSync(gitignorePath, updated)
     console.log("Updated .gitignore with .boons/ entries")
   }
-
-  console.log(`Installed tools to ${toolsDir}`)
-  console.log(`Installed skills to ${skillsDir}`)
 }
 
 async function configureCloud(cwd: string, args: Record<string, string>) {
@@ -546,6 +314,281 @@ async function configureCloud(cwd: string, args: Record<string, string>) {
 
   writeConfig({ remote: remote as any }, cwd)
   console.log(`Configured remote: ${provider}${remote.bucket ? ` (bucket: ${remote.bucket})` : ""}${remote.account ? ` (account: ${remote.account})` : ""}`)
+}
+
+async function cmdInstall(tool: string) {
+  const known = ["opencode"]
+  if (!known.includes(tool)) {
+    console.error(`Unknown tool: "${tool}". Supported: ${known.join(", ")}`)
+    process.exit(1)
+  }
+
+  if (tool === "opencode") {
+    const configDir = path.join(os.homedir(), ".config", "opencode")
+    const toolsDir = path.join(configDir, "tools")
+    const skillsDir = path.join(configDir, "skills")
+
+    const exportToolContent = `import { tool } from "@opencode-ai/plugin"
+import * as fs from "fs"
+import * as path from "path"
+
+export default tool({
+  description: "Export the current opencode session to a boons artifact directory (.boons/)",
+  args: {},
+  async execute(_args, context) {
+    if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
+      return "This project does not have a .boons/ directory. Run \`boons init\` to configure cloud sharing."
+    }
+    const result = await Bun.$\`boons export --session-id \${context.sessionID} --json\`.text()
+    const parsed = JSON.parse(result.trim())
+    return \`Exported \${parsed.messageCount} messages to \${parsed.dir}\`
+  },
+})
+`
+
+    const pushToolContent = `import { tool } from "@opencode-ai/plugin"
+import * as fs from "fs"
+import * as path from "path"
+
+export default tool({
+  description: "Push session artifacts for the current branch to the cloud bucket",
+  args: {
+    sessionId: tool.schema.string().optional(),
+    branch: tool.schema.string().optional(),
+  },
+  async execute(args, context) {
+    if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
+      return "This project does not have a .boons/ directory. Run \`boons init\` to configure cloud sharing."
+    }
+    const result = await Bun.$\`boons push \${args.branch ? ["--branch", args.branch] : []} \${args.sessionId ? ["--session-id", args.sessionId] : []}\`.text()
+    return result.trim()
+  },
+})
+`
+
+    const pullToolContent = `import { tool } from "@opencode-ai/plugin"
+import * as fs from "fs"
+import * as path from "path"
+
+export default tool({
+  description: "Pull session artifacts for the current branch from the cloud bucket",
+  args: {
+    sessionId: tool.schema.string().optional(),
+    branch: tool.schema.string().optional(),
+  },
+  async execute(args, context) {
+    if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
+      return "This project does not have a .boons/ directory. Run \`boons init\` to configure cloud sharing."
+    }
+    const result = await Bun.$\`boons pull \${args.branch ? ["--branch", args.branch] : []} \${args.sessionId ? ["--session-id", args.sessionId] : []}\`.text()
+    return result.trim()
+  },
+})
+`
+
+    const listRemoteToolContent = `import { tool } from "@opencode-ai/plugin"
+import * as fs from "fs"
+import * as path from "path"
+
+export default tool({
+  description: "List remote sessions available for the current branch",
+  args: {
+    branch: tool.schema.string().optional(),
+  },
+  async execute(args, context) {
+    if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
+      return "This project does not have a .boons/ directory. Run \`boons init\` to configure cloud sharing."
+    }
+    const result = await Bun.$\`boons ls --remote --json \${args.branch ? ["--branch", args.branch] : []}\`.text()
+    return result.trim()
+  },
+})
+`
+
+    const saveSkillContent = `---
+name: session-save
+description: Export opencode sessions to .boons/ artifacts directory
+---
+
+## What this does
+
+Provides the \`export-session\` tool that exports the current chat session
+to the \`.boons/\` artifact directory. Each export creates a session directory
+containing:
+
+- \`raw.jsonl\` — the full message history in native opencode format
+- \`info.json\` — metadata (session name, author, branch, participants, timestamps)
+
+## When to use this
+
+Call \`export-session\` when:
+- The user explicitly asks to save or export the session
+- Before or after making a git commit — suggest it
+- A significant task or feature is completed — suggest it
+- Before switching branches — suggest it
+- At natural stopping points in the conversation
+
+Only use in projects with a \`.boons/\` directory.
+
+## After export
+
+After the tool returns, it provides the path to the exported session directory.
+Use that path to:
+
+1. Generate \`summary.md\` — review the messages and write a concise summary
+   of what was accomplished, key decisions made, and what remains uncertain
+2. Optionally create \`plan.md\` — if the session included planning or design
+   discussions, document the current intent and next steps
+3. Optionally create \`decisions.md\` — if specific architectural or design
+   decisions were settled, list them with rationale
+
+These are human-readable markdown files meant to be reviewed and edited by
+the author before sharing.
+
+The user may also ask for other documents to be written into the session
+directory — create whatever they request. The session directory is the
+canonical home for all artifacts related to a session.
+`
+
+    const loadSkillContent = `---
+name: session-load
+description: Discover and read session artifacts from .boons/ directory
+---
+
+## What this does
+
+Guides the agent in discovering and using saved session artifacts
+from the \`.boons/\` directory to understand prior work on a branch.
+
+## Available files per session
+
+Every saved session directory (\`.boons/<branch>/<session-id>/\`) contains:
+
+- \`info.json\` — metadata (name, author, participants, timestamps)
+- \`raw.jsonl\` — complete message history in native tool format
+
+Sessions may also have additional files generated after export:
+
+- \`summary.md\` — human-readable summary of what was accomplished,
+  key decisions made, and what remains uncertain
+- \`plan.md\` — current intent, design approach, and next steps
+- \`decisions.md\` — architectural or design decisions with rationale
+- Any other docs the author created
+
+To see which files are present for a particular session, list its directory.
+
+## When to use this
+
+Use \`boons ls\` when:
+- The user explicitly asks about prior decisions or context
+- After switching to a new branch — suggest loading saved sessions for that branch
+- When reviewing someone else's work on a branch — suggest loading their sessions
+
+Only use in projects with a \`.boons/\` directory.
+
+## Discovery workflow
+
+1. Run \`boons ls [--branch <name>]\` to see what sessions exist.
+   This shows session names, message counts, and which extra files
+   (summary, plan, decisions, etc.) are available.
+2. For sessions that look relevant, read \`summary.md\` first for
+   a concise overview and key decisions.
+3. If more detail is needed, read \`raw.jsonl\` — each line is a JSON
+   object with \`{info, parts}\` reflecting the chat message.
+   Search it with grep or process it line by line.
+4. Check for any other docs present in the session directory
+   (\`plan.md\`, \`decisions.md\`, etc.).
+`
+
+    const pushSkillContent = `---
+name: session-push
+description: Push session artifacts to a shared cloud bucket
+---
+
+## What this does
+
+Provides the \`session-push\` tool that uploads local session artifacts
+for the current branch to the configured cloud bucket. This makes sessions
+visible to teammates who pull from the same bucket.
+
+## When to use this
+
+Call \`session-push\` when:
+- The user explicitly asks to share or push sessions
+- Before pushing to the remote repository — ask the user
+- Before creating or marking a PR as ready for review — ask the user
+
+Only use in projects with a \`.boons/\` directory. **Always ask the user before running** — this shares session data with others.
+
+
+
+## Before first push
+
+Make sure your cloud bucket has **object versioning** enabled. This gives you
+the ability to recover from accidental overwrites — boons doesn't prevent
+overwriting sessions, so versioning is your safety net.
+
+## Default behavior
+
+\`session-push\` pushes all sessions for the current branch by default. Use
+the \`branch\` and \`sessionId\` arguments explicitly only when you need to
+push sessions from a different context.
+
+## Selective sharing
+
+If a session contains sensitive or irrelevant content, you may be asked to
+curate it before pushing. Remove private messages from the session's
+\`raw.jsonl\` and update \`info.json\` as needed. The push tool will upload
+whatever is in the local session directory.
+`
+
+    const pullSkillContent = `---
+name: session-pull
+description: Pull session artifacts from a shared cloud bucket
+---
+
+## What this does
+
+Provides the \`session-pull\` tool that downloads session artifacts for the
+current branch from the configured cloud bucket. This is how a collaborator
+or reviewer fetches context created by others.
+
+## When to use this
+
+Call \`session-pull\` when:
+- The user explicitly asks to fetch remote sessions
+- After pulling from the remote repository — suggest it
+- Before reviewing work on a branch — suggest fetching context from collaborators
+
+Only use in projects with a \`.boons/\` directory.
+
+## Workflow
+
+1. First run \`session-list-remote\` (or \`boons ls --remote\`) to see what
+   sessions exist for the current branch
+2. Then run \`session-pull\` to fetch them into \`.boons/<branch>/\`
+3. After pulling, use \`session-load\` guidance to read them
+
+## Default behavior
+
+\`session-pull\` pulls all sessions for the current branch by default. Use the
+\`branch\` argument to pull sessions from a different branch context, or
+\`sessionId\` to pull a specific session.
+`
+
+    await Bun.$`mkdir -p ${toolsDir} ${path.join(skillsDir, "session-save")} ${path.join(skillsDir, "session-load")} ${path.join(skillsDir, "session-push")} ${path.join(skillsDir, "session-pull")}`
+    await Bun.write(path.join(toolsDir, "export-session.ts"), exportToolContent)
+    await Bun.write(path.join(toolsDir, "session-push.ts"), pushToolContent)
+    await Bun.write(path.join(toolsDir, "session-pull.ts"), pullToolContent)
+    await Bun.write(path.join(toolsDir, "session-list-remote.ts"), listRemoteToolContent)
+    await Bun.write(path.join(skillsDir, "session-save", "SKILL.md"), saveSkillContent)
+    await Bun.write(path.join(skillsDir, "session-load", "SKILL.md"), loadSkillContent)
+    await Bun.write(path.join(skillsDir, "session-push", "SKILL.md"), pushSkillContent)
+    await Bun.write(path.join(skillsDir, "session-pull", "SKILL.md"), pullSkillContent)
+
+    console.log(`Installed boons tools to ${toolsDir}`)
+    console.log(`Installed boons skills to ${skillsDir}`)
+  }
 }
 
 async function cmdConfig() {
@@ -637,6 +680,13 @@ async function main() {
       break
     case "init":
       await cmdInit(opts)
+      break
+    case "install":
+      if (args.length < 2) {
+        console.error("Usage: boons install <toolname>")
+        process.exit(1)
+      }
+      await cmdInstall(args[1])
       break
     case "config":
       await cmdConfig()

@@ -16,28 +16,74 @@ import {
   listRemote,
 } from "./cloud"
 
-let pipedAnswers: string[] | null = null
+let pipedAnswers: string[] | null | undefined
+let pipedAnswersLoaded = false
 
-if (!process.stdin.isTTY) {
-  const rl = readline.createInterface({ input: process.stdin })
-  const lines: string[] = []
-  for await (const line of rl) {
-    lines.push(line.trim())
+async function loadPipedAnswersIfNeeded(): Promise<void> {
+  if (pipedAnswersLoaded) return
+  pipedAnswersLoaded = true
+
+  if (process.stdin.isTTY) {
+    pipedAnswers = null
+    return
   }
-  rl.close()
-  pipedAnswers = lines
+
+  let st: fs.Stats
+  try {
+    st = fs.fstatSync(0)
+  } catch {
+    pipedAnswers = null
+    return
+  }
+
+  if (st.isFile()) {
+    pipedAnswers = fs.readFileSync(0, "utf-8").split("\n").map((l) => l.trim())
+    return
+  }
+
+  if (st.isFIFO() || st.isSocket()) {
+    const readable = process.stdin as NodeJS.ReadableStream & { readableLength?: number }
+    if ((readable.readableLength ?? 0) === 0) {
+      pipedAnswers = null
+      return
+    }
+    const rl = readline.createInterface({ input: process.stdin, terminal: false })
+    const lines: string[] = []
+    for await (const line of rl) {
+      lines.push(line.trim())
+    }
+    rl.close()
+    pipedAnswers = lines
+    return
+  }
+
+  pipedAnswers = null
 }
 
-function ask(query: string): Promise<string> {
-  if (pipedAnswers) {
+async function ask(query: string): Promise<string> {
+  if (process.stdin.isTTY) {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+    return new Promise((resolve) => {
+      rl.question(query + " ", (answer) => {
+        rl.close()
+        resolve(answer.trim())
+      })
+    })
+  }
+
+  await loadPipedAnswersIfNeeded()
+
+  if (pipedAnswers !== null && pipedAnswers !== undefined) {
     const answer = pipedAnswers.shift() ?? ""
     console.log(`${query} ${answer}`)
-    return Promise.resolve(answer)
+    return answer
   }
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-  return new Promise(resolve => {
-    rl.question(query + " ", answer => { rl.close(); resolve(answer.trim()) })
-  })
+
+  console.error("Interactive input required but stdin is not a terminal.")
+  console.error(
+    "Use provider flags (e.g. boons init --provider gcp --bucket NAME) or run from a terminal.",
+  )
+  process.exit(1)
 }
 
 async function askRequired(query: string, label: string): Promise<string> {
@@ -72,7 +118,7 @@ Provider flags (for init):
   --global                  Write to ~/.config/boons/config.json (repo-keyed) instead of .boons/config.json
 
 Options:
-  --tool <name>       Tool to export from (opencode | claude-code)
+  --tool <name>       Tool to export from (opencode | claude-code | cursor)
   --summary <text>    Session summary (required for export)
   --session-id <id>   Session to export/push/pull (default: auto-detect / all)
   --branch <name>     Filter by branch (default: current branch)
@@ -81,6 +127,7 @@ Options:
 Environment:
   BOONS_DB_PATH       OpenCode database path (default: ~/.local/share/opencode/opencode.db)
   BOONS_CLAUDE_DIR    Claude Code projects directory (default: ~/.claude/projects)
+  BOONS_CURSOR_DIR    Cursor projects directory (default: ~/.cursor/projects)
 `
 
 async function cmdExport(args: Record<string, string>) {
@@ -381,6 +428,8 @@ async function cmdInstall(tool: string) {
     await installOpenCode()
   } else if (tool === "claude-code") {
     await installClaudeCode()
+  } else if (tool === "cursor") {
+    await installCursor()
   }
 }
 
@@ -644,7 +693,9 @@ Only use in projects with a \`.boons/\` directory.
 \`sessionId\` to pull a specific session.
 `
 
-  await Bun.$`mkdir -p ${toolsDir} ${path.join(skillsDir, "session-save")} ${path.join(skillsDir, "session-load")} ${path.join(skillsDir, "session-push")} ${path.join(skillsDir, "session-pull")}`
+  for (const dir of [toolsDir, path.join(skillsDir, "session-save"), path.join(skillsDir, "session-load"), path.join(skillsDir, "session-push"), path.join(skillsDir, "session-pull")]) {
+    fs.mkdirSync(dir, { recursive: true })
+  }
   await Bun.write(path.join(toolsDir, "export-session.ts"), exportToolContent)
   await Bun.write(path.join(toolsDir, "session-push.ts"), pushToolContent)
   await Bun.write(path.join(toolsDir, "session-pull.ts"), pullToolContent)
@@ -863,7 +914,9 @@ Only use in projects with a \`.boons/\` directory.
     { name: "session-pull", content: pullSkillContent },
   ]
 
-  const pluginDirReady = Bun.$`mkdir -p ${path.join(pluginDir, ".claude-plugin")} ${skills.map(s => path.join(skillsDir, s.name))}`
+  for (const dir of [path.join(pluginDir, ".claude-plugin"), ...skills.map(s => path.join(skillsDir, s.name))]) {
+    fs.mkdirSync(dir, { recursive: true })
+  }
 
   await Bun.write(path.join(pluginDir, ".claude-plugin", "plugin.json"), pluginJson)
   for (const skill of skills) {
@@ -871,6 +924,166 @@ Only use in projects with a \`.boons/\` directory.
   }
 
   console.log(`Installed boons plugin to ${pluginDir}`)
+}
+
+async function installCursor() {
+  const rulesDir = path.join(os.homedir(), ".cursor", "rules")
+
+  const saveRuleContent = `---
+description: Save the current Cursor session to a .boons/ archive. Use this whenever completing a meaningful task, before or after git commits, before switching branches, or at natural stopping points. Only relevant in projects that have a .boons/ directory.
+alwaysApply: false
+---
+
+## What this does
+
+Export the current agent session to the \`.boons/\` artifact directory.
+Each export creates a session directory containing:
+
+- \`raw.jsonl\` — the complete message history in native JSONL format
+- \`info.json\` — metadata (session name, author, branch, participants, timestamps)
+- \`summary.md\` — a summary you provide of what was accomplished
+
+## When to use this
+
+Run \`boons export --tool cursor --summary "..."\` when:
+- The user explicitly asks to save or export the session
+- Before or after making a git commit — suggest it
+- A significant task or feature is completed — suggest it
+- Before switching branches — suggest it
+- At natural stopping points in the conversation
+
+Only use in projects with a \`.boons/\` directory.
+
+## Using the command
+
+1. Compose a concise summary of what was accomplished, key decisions made,
+   and what remains uncertain
+2. Run \`boons export --tool cursor --summary "<summary>" --session-id <id>\`
+   Use \`--session-id\` to target a specific session, or omit to auto-detect
+   the most recent one. The session ID is the UUID shown in the Cursor chat panel.
+   Pass \`--summary\` as a single quoted string on one line — do not use heredocs
+   or command substitution (\`\$(cat <<EOF...EOF)\`), which hang in non-interactive shells.
+3. After the command succeeds, read \`raw.jsonl\` in the created session
+   directory and refine \`summary.md\` with any important details you missed.
+
+You may also optionally create:
+
+- \`plan.md\` — if the session included planning or design discussions,
+  document the current intent and next steps
+- \`decisions.md\` — if specific architectural or design decisions were
+  settled, list them with rationale
+
+These are human-readable markdown files meant to be reviewed and edited by
+the author before sharing. The session directory is the canonical home
+for all artifacts related to a session.
+`
+
+  const loadRuleContent = `---
+description: Load and review prior session artifacts from the .boons/ directory. Use when the user asks about prior decisions, after switching to a new branch, or when reviewing someone else's work. Only relevant in projects with a .boons/ directory.
+alwaysApply: false
+---
+
+## What this does
+
+Guides discovery and use of saved session artifacts from the \`.boons/\`
+directory to understand prior work on a branch.
+
+## Available files per session
+
+Every saved session directory (\`.boons/<branch>/<session-id>/\`) contains:
+
+- \`info.json\` — metadata (name, author, participants, timestamps)
+- \`raw.jsonl\` — complete message history in native JSONL format
+
+Sessions may also have:
+
+- \`summary.md\` — human-readable summary of what was accomplished
+- \`plan.md\` — current intent, design approach, and next steps
+- \`decisions.md\` — architectural or design decisions with rationale
+
+## When to use this
+
+Use \`boons ls\` when:
+- The user explicitly asks about prior decisions or context
+- After switching to a new branch — suggest loading saved sessions for that branch
+- When reviewing someone else's work on a branch — suggest loading their sessions
+
+Only use in projects with a \`.boons/\` directory.
+
+## Discovery workflow
+
+1. Run \`boons ls [--branch <name>]\` to see what sessions exist.
+2. For sessions that look relevant, read \`summary.md\` first.
+3. If more detail is needed, read \`raw.jsonl\` line by line.
+4. Check for any other docs present (\`plan.md\`, \`decisions.md\`, etc.).
+`
+
+  const pushRuleContent = `---
+description: Push local .boons/ session artifacts to a shared cloud bucket, making them visible to collaborators. Always ask the user before pushing. Only relevant in projects with a .boons/ directory.
+alwaysApply: false
+---
+
+## What this does
+
+Uploads local session artifacts for the current branch to the configured
+cloud bucket. This makes sessions visible to teammates who pull from the
+same bucket.
+
+## When to use this
+
+Run \`boons push\` when:
+- The user explicitly asks to share or push sessions
+- Before pushing to the remote repository — ask the user
+- Before creating or marking a PR as ready for review — ask the user
+
+Only use in projects with a \`.boons/\` directory. **Always ask the user before running.**
+
+## Default behavior
+
+\`boons push\` pushes all sessions for the current branch by default. Use
+the \`--branch\` and \`--session-id\` arguments explicitly only when needed.
+`
+
+  const pullRuleContent = `---
+description: Pull session artifacts from a shared cloud bucket into the local .boons/ directory. Use after pulling from the remote repository, before reviewing work on a branch, or when the user asks to fetch remote sessions. Only relevant in projects with a .boons/ directory.
+alwaysApply: false
+---
+
+## What this does
+
+Downloads session artifacts for the current branch from the configured
+cloud bucket. This is how a collaborator or reviewer fetches context
+created by others.
+
+## When to use this
+
+Run \`boons pull\` when:
+- The user explicitly asks to fetch remote sessions
+- After pulling from the remote repository — suggest it
+- Before reviewing work on a branch — suggest fetching context from collaborators
+
+Only use in projects with a \`.boons/\` directory.
+
+## Workflow
+
+1. Run \`boons ls --remote\` to see what sessions exist for the current branch
+2. Run \`boons pull\` to fetch them into \`.boons/<branch>/\`
+3. Use the session-load rule guidance to read them
+`
+
+  const rules = [
+    { name: "boons-session-save.mdc", content: saveRuleContent },
+    { name: "boons-session-load.mdc", content: loadRuleContent },
+    { name: "boons-session-push.mdc", content: pushRuleContent },
+    { name: "boons-session-pull.mdc", content: pullRuleContent },
+  ]
+
+  fs.mkdirSync(rulesDir, { recursive: true })
+  for (const rule of rules) {
+    await Bun.write(path.join(rulesDir, rule.name), rule.content)
+  }
+
+  console.log(`Installed boons rules to ${rulesDir}`)
 }
 
 async function cmdConfig() {

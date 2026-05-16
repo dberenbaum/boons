@@ -6,7 +6,7 @@ export interface Author {
 export function getBranch(cwd?: string): string {
   const result = Bun.spawnSync(
     ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-    { cwd: cwd ?? process.cwd() },
+    { cwd: cwd ?? process.cwd(), stdin: null },
   )
   return result.stdout.toString().trim()
 }
@@ -14,12 +14,12 @@ export function getBranch(cwd?: string): string {
 export function getAuthor(cwd?: string): Author {
   const name = Bun.spawnSync(
     ["git", "config", "user.name"],
-    { cwd: cwd ?? process.cwd() },
+    { cwd: cwd ?? process.cwd(), stdin: null },
   ).stdout.toString().trim()
 
   const email = Bun.spawnSync(
     ["git", "config", "user.email"],
-    { cwd: cwd ?? process.cwd() },
+    { cwd: cwd ?? process.cwd(), stdin: null },
   ).stdout.toString().trim()
 
   return { name, email }

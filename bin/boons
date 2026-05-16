@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-exec bun run "$(dirname "$0")/../src/boons.ts" "$@"
+exec bun run "$(dirname "$(readlink -f "$0")")/../src/boons.ts" "$@"

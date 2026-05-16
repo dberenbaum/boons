@@ -441,6 +441,32 @@ async function cmdInstall(tool: string) {
   }
 }
 
+function ensureBoonsOnPath() {
+  const currentBin = path.resolve(import.meta.dir, "..", "bin", "boons")
+  const localBin = path.join(os.homedir(), ".local", "bin")
+  const linkPath = path.join(localBin, "boons")
+
+  if (fs.existsSync(linkPath)) {
+    try {
+      const target = fs.realpathSync(linkPath)
+      if (target === currentBin) return
+      fs.unlinkSync(linkPath)
+    } catch {
+      fs.unlinkSync(linkPath)
+    }
+  }
+
+  fs.mkdirSync(localBin, { recursive: true })
+  fs.symlinkSync(currentBin, linkPath)
+  console.log(`Symlinked boons to ${linkPath}`)
+
+  const pathDirs = (process.env.PATH || "").split(":")
+  if (!pathDirs.includes(localBin)) {
+    console.log(`\nNote: Add ${localBin} to your PATH for boons to work in tools:`)
+    console.log(`  export PATH="${localBin}:$PATH"`)
+  }
+}
+
 async function installOpenCode() {
   const configDir = path.join(os.homedir(), ".config", "opencode")
   const toolsDir = path.join(configDir, "tools")
@@ -780,6 +806,7 @@ Call \`session-pull\` when:
 
   console.log(`Installed boons tools to ${toolsDir}`)
   console.log(`Installed boons skills to ${skillsDir}`)
+  ensureBoonsOnPath()
 
   const globalCfg = readGlobalConfig()
   if (!globalCfg.default) {
@@ -997,6 +1024,7 @@ Only use in projects with a \`.boons/\` directory.
   }
 
   console.log(`Installed boons plugin to ${pluginDir}`)
+  ensureBoonsOnPath()
 }
 
 async function installCursor() {
@@ -1157,6 +1185,7 @@ Only use in projects with a \`.boons/\` directory.
   }
 
   console.log(`Installed boons rules to ${rulesDir}`)
+  ensureBoonsOnPath()
 }
 
 async function cmdConfig() {

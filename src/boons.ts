@@ -97,8 +97,8 @@ async function askRequired(query: string, label: string): Promise<string> {
 const HELP = `boons — collaborative session artifact tool
 
 Usage:
-  boons export --tool <name> [--session-id <id>] [--summary <text>] [--json]
-                                                     Export session to .boons/
+  boons session-save --tool <name> [--session-id <id>] [--summary <text>] [--json]
+                                                      Save session to .boons/
   boons ls [--branch <name>] [--json]                 List saved sessions
   boons ls --remote [--branch <name>] [--json]        List remote sessions
   boons init [-q | --quiet]                           Create .boons/ dir + update .gitignore (non-interactive)
@@ -131,7 +131,7 @@ Environment:
   BOONS_CURSOR_DIR    Cursor projects directory (default: ~/.cursor/projects)
 `
 
-async function cmdExport(args: Record<string, string>) {
+async function cmdSessionSave(args: Record<string, string>) {
   const tool = args["--tool"]
   if (!tool || !isKnownTool(tool)) {
     console.error("--tool is required. Valid tools: " + validTools().join(" | "))
@@ -152,7 +152,7 @@ async function cmdExport(args: Record<string, string>) {
   if (asJson) {
     console.log(JSON.stringify(result))
   } else {
-    console.log(`Exported ${result.messageCount} messages to ${result.dir}`)
+    console.log(`Saved ${result.messageCount} messages to ${result.dir}`)
   }
 }
 
@@ -477,7 +477,7 @@ import * as fs from "fs"
 import * as path from "path"
 
 export default tool({
-  description: "Export the current opencode session to a boons artifact directory (.boons/). You MUST provide a summary of what was accomplished.",
+  description: "Save the current opencode session to a boons artifact directory (.boons/). You MUST provide a summary of what was accomplished.",
   args: {
     summary: tool.schema.string().describe("A concise summary of what the session accomplished, key decisions made, and what remains uncertain"),
   },
@@ -489,7 +489,7 @@ export default tool({
         return "boons is not available. Install it from https://github.com/anomalyco/boons"
       }
     }
-    const result = await Bun.$\`boons export --tool opencode --session-id \${context.sessionID} --summary \${args.summary} --json\`.text()
+    const result = await Bun.$\`boons session-save --tool opencode --session-id \${context.sessionID} --summary \${args.summary} --json\`.text()
     return result.trim()
   },
 })
@@ -597,7 +597,7 @@ description: Export opencode sessions to .boons/ artifacts directory
 
 ## What this does
 
-Provides the \`export-session\` tool that exports the current chat session
+Provides the \`session-save\` tool that saves the current chat session
 to the \`.boons/\` artifact directory. Each export creates a session directory
 containing:
 
@@ -606,7 +606,7 @@ containing:
 
 ## When to use this
 
-Call \`export-session\` when:
+Call \`session-save\` when:
 - The user explicitly asks to save or export the session
 - Before or after making a git commit — suggest it
 - A significant task or feature is completed — suggest it
@@ -615,7 +615,7 @@ Call \`export-session\` when:
 
 ## Handling uninitialized projects
 
-- **User explicitly asks** to save or export: just call \`export-session\`.
+- **User explicitly asks** to save or export: just call \`session-save\`.
   It auto-initializes boons if needed.
 - **Agent-proactive suggestion** (commit, milestone, branch switch, natural
   stopping point): first check if \`.boons/\` exists. If not, skip the suggestion
@@ -625,7 +625,7 @@ Call \`export-session\` when:
 
 1. Compose a summary of what was accomplished, key decisions made, and
    what remains uncertain
-2. Call \`export-session\` with your summary as the \`summary\` argument.
+2. Call \`session-save\` with your summary as the \`summary\` argument.
    The tool exports the session and writes \`summary.md\` automatically.
    This argument is required — the export will not proceed without it.
 3. After the tool returns, read \`raw.jsonl\` and refine \`summary.md\` with
@@ -794,7 +794,7 @@ Call \`session-pull\` when:
   for (const dir of [toolsDir, path.join(skillsDir, "session-save"), path.join(skillsDir, "session-load"), path.join(skillsDir, "session-push"), path.join(skillsDir, "session-pull")]) {
     fs.mkdirSync(dir, { recursive: true })
   }
-  await Bun.write(path.join(toolsDir, "export-session.ts"), exportToolContent)
+  await Bun.write(path.join(toolsDir, "session-save.ts"), exportToolContent)
   await Bun.write(path.join(toolsDir, "session-push.ts"), pushToolContent)
   await Bun.write(path.join(toolsDir, "session-pull.ts"), pullToolContent)
   await Bun.write(path.join(toolsDir, "session-list-remote.ts"), listRemoteToolContent)
@@ -847,7 +847,7 @@ Each export creates a session directory containing:
 
 ## When to use this
 
-Run \`boons export --tool claude-code --summary "..."\` when:
+Run \`boons session-save --tool claude-code --summary "..."\` when:
 - The user explicitly asks to save or export the session
 - Before or after making a git commit — suggest it
 - A significant task or feature is completed — suggest it
@@ -860,7 +860,7 @@ Only use in projects with a \`.boons/\` directory.
 
 1. Compose a concise summary of what was accomplished, key decisions made,
    and what remains uncertain
-2. Run \`boons export --tool claude-code --summary "<summary>" --session-id <id>\`
+2. Run \`boons session-save --tool claude-code --summary "<summary>" --session-id <id>\`
    Use \`--session-id\` to target a specific session, or omit to auto-detect
    the most recent one
 3. After the command succeeds, read \`raw.jsonl\` in the created session
@@ -1046,7 +1046,7 @@ Each export creates a session directory containing:
 
 ## When to use this
 
-Run \`boons export --tool cursor --summary "..."\` when:
+Run \`boons session-save --tool cursor --summary "..."\` when:
 - The user explicitly asks to save or export the session
 - Before or after making a git commit — suggest it
 - A significant task or feature is completed — suggest it
@@ -1059,7 +1059,7 @@ Only use in projects with a \`.boons/\` directory.
 
 1. Compose a concise summary of what was accomplished, key decisions made,
    and what remains uncertain
-2. Run \`boons export --tool cursor --summary "<summary>" --session-id <id>\`
+2. Run \`boons session-save --tool cursor --summary "<summary>" --session-id <id>\`
    Use \`--session-id\` to target a specific session, or omit to auto-detect
    the most recent one. The session ID is the UUID shown in the Cursor chat panel.
    Pass \`--summary\` as a single quoted string on one line — do not use heredocs
@@ -1272,8 +1272,8 @@ async function main() {
   const opts = parseArgs(args.slice(1))
 
   switch (cmd) {
-    case "export":
-      await cmdExport(opts)
+    case "session-save":
+      await cmdSessionSave(opts)
       break
     case "ls":
       await cmdLs(opts)

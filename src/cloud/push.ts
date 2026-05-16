@@ -45,7 +45,7 @@ export async function push(opts: PushOptions): Promise<PushResult> {
     const detail = opts.sessionID
       ? `session ${opts.sessionID}`
       : "any sessions"
-    throw new Error(`No saved sessions found for branch "${branch}" (${detail}). Export sessions first with \`boons export\`.`)
+    throw new Error(`No saved sessions found for branch "${branch}" (${detail}). Save sessions first with \`boons session-save\`.`)
   }
 
   for (const sessionID of sessions) {

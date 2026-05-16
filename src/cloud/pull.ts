@@ -1,5 +1,5 @@
 import * as path from "path"
-import { resolveConfig } from "./config"
+import { resolveConfig, getRepoKey } from "./config"
 import { createProvider } from "./factory"
 import { getBranch } from "../git"
 
@@ -23,9 +23,8 @@ export async function pull(opts: PullOptions): Promise<PullResult> {
 
   const provider = createProvider(remote)
   const branch = opts.branch ?? getBranch(cwd)
-  const remoteBase = remote.prefix
-    ? path.posix.join(remote.prefix, branch)
-    : branch
+  const repoKey = getRepoKey(cwd) ?? ""
+  const remoteBase = path.posix.join(...[remote.prefix, repoKey, branch].filter(Boolean))
 
   let sessionIDs: string[]
 

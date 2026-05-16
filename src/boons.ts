@@ -372,14 +372,17 @@ import * as fs from "fs"
 import * as path from "path"
 
 export default tool({
-  description: "Export the current opencode session to a boons artifact directory (.boons/)",
-  args: {},
-  async execute(_args, context) {
+  description: "Export the current opencode session to a boons artifact directory (.boons/). You MUST provide a summary of what was accomplished.",
+  args: {
+    summary: tool.schema.string().describe("A concise summary of what the session accomplished, key decisions made, and what remains uncertain"),
+  },
+  async execute(args, context) {
     if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
       return "This project does not have a .boons/ directory. Run \`boons init\` to configure cloud sharing."
     }
     const result = await Bun.$\`boons export --session-id \${context.sessionID} --json\`.text()
     const parsed = JSON.parse(result.trim())
+    await Bun.write(path.join(parsed.dir, "summary.md"), args.summary + "\\n")
     return \`Exported \${parsed.messageCount} messages to \${parsed.dir}\`
   },
 })
@@ -469,24 +472,30 @@ Call \`export-session\` when:
 
 Only use in projects with a \`.boons/\` directory.
 
-## After export
+## Using the tool
 
-After the tool returns, it provides the path to the exported session directory.
-Use that path to:
+1. Compose a summary of what was accomplished, key decisions made, and
+   what remains uncertain
+2. Call \`export-session\` with your summary as the \`summary\` argument.
+   The tool exports the session and writes \`summary.md\` automatically.
+   This argument is required — the export will not proceed without it.
+3. After the tool returns, read \`raw.jsonl\` and refine \`summary.md\` with
+   any important details you missed. Your initial summary is written from
+   memory; the session log gives you a second pass to catch specifics
+   about files changed, error messages, design rationale, and more.
 
-1. Generate \`summary.md\` — review the messages and write a concise summary
-   of what was accomplished, key decisions made, and what remains uncertain
-2. Optionally create \`plan.md\` — if the session included planning or design
-   discussions, document the current intent and next steps
-3. Optionally create \`decisions.md\` — if specific architectural or design
-   decisions were settled, list them with rationale
+You may also optionally create:
+
+- \`plan.md\` — if the session included planning or design discussions,
+  document the current intent and next steps
+- \`decisions.md\` — if specific architectural or design decisions were
+  settled, list them with rationale
+- Any other docs the user asks for or that you think would be useful
+  to someone loading this session later
 
 These are human-readable markdown files meant to be reviewed and edited by
-the author before sharing.
-
-The user may also ask for other documents to be written into the session
-directory — create whatever they request. The session directory is the
-canonical home for all artifacts related to a session.
+the author before sharing. The session directory is the canonical home
+for all artifacts related to a session.
 `
 
     const loadSkillContent = `---

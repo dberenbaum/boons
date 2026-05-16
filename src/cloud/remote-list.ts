@@ -1,6 +1,6 @@
 import * as path from "path"
 import * as os from "os"
-import { resolveConfig } from "./config"
+import { resolveConfig, getRepoKey } from "./config"
 import { createProvider } from "./factory"
 import { getBranch } from "../git"
 
@@ -25,9 +25,8 @@ export async function listRemote(opts: ListRemoteOptions): Promise<RemoteSession
 
   const provider = createProvider(remote)
   const branch = opts.branch ?? getBranch(cwd)
-  const remoteBase = remote.prefix
-    ? path.posix.join(remote.prefix, branch)
-    : branch
+  const repoKey = getRepoKey(cwd) ?? ""
+  const remoteBase = path.posix.join(...[remote.prefix, repoKey, branch].filter(Boolean))
 
   const sessionIDs = await provider.listDirs(remoteBase)
   sessionIDs.sort()

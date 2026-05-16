@@ -1,6 +1,6 @@
 import * as path from "path"
 import { Glob } from "bun"
-import { resolveConfig } from "./config"
+import { resolveConfig, getRepoKey } from "./config"
 import { createProvider } from "./factory"
 import { getBranch } from "../git"
 
@@ -24,9 +24,8 @@ export async function push(opts: PushOptions): Promise<PushResult> {
 
   const provider = createProvider(remote)
   const branch = opts.branch ?? getBranch(cwd)
-  const remoteBase = remote.prefix
-    ? path.posix.join(remote.prefix, branch)
-    : branch
+  const repoKey = getRepoKey(cwd) ?? ""
+  const remoteBase = path.posix.join(...[remote.prefix, repoKey, branch].filter(Boolean))
 
   const boonsDir = path.join(cwd, ".boons", branch)
   const pattern = opts.sessionID

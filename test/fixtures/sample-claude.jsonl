@@ -1,0 +1,5 @@
+{"timestamp":"2025-01-15T10:00:00Z","type":"user","uuid":"u1","parentUuid":null,"sessionId":"sess-123","cwd":"/home/user/project","gitBranch":"main","message":{"role":"user","content":"Hello"}}
+{"timestamp":"2025-01-15T10:00:05Z","type":"assistant","uuid":"u2","parentUuid":"u1","sessionId":"sess-123","cwd":"/home/user/project","gitBranch":"main","message":{"role":"assistant","content":"Hi! How can I help?"}}
+{"timestamp":"2025-01-15T10:00:10Z","type":"ai-title","uuid":"u3","parentUuid":null,"sessionId":"sess-123","aiTitle":"Greeting Session","message":{"role":"assistant","content":"Title set"}}
+{"timestamp":"2025-01-15T10:00:15Z","type":"user","uuid":"u4","parentUuid":"u2","sessionId":"sess-123","cwd":"/home/user/project","gitBranch":"main","message":{"role":"user","content":[{"type":"text","text":"What is the weather?"}]}}
+{"timestamp":"2025-01-15T10:00:20Z","type":"file-history-snapshot","uuid":"u5","parentUuid":"u4","sessionId":"sess-123","message":{"role":"system","content":"snapshot content"}}

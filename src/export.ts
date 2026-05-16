@@ -9,7 +9,6 @@ import { getBranch, getAuthor } from "./git"
 
 export interface ExportOptions {
   sessionID?: string
-  directory?: string
   dbPath?: string
 }
 
@@ -20,7 +19,7 @@ export interface ExportResult {
 }
 
 export async function exportSession(opts: ExportOptions): Promise<ExportResult> {
-  const cwd = opts.directory ?? process.cwd()
+  const cwd = process.cwd()
   const dbPath = opts.dbPath ?? getDefaultDBPath()
   const sessionID = opts.sessionID ?? resolveSessionID(dbPath, cwd)
 

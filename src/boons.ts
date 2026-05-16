@@ -1,21 +1,72 @@
 import * as path from "path"
 import * as fs from "fs"
+import * as readline from "node:readline"
 import { Glob } from "bun"
 import { exportSession } from "./export"
+import {
+  readConfig,
+  writeConfig,
+  push,
+  pull,
+  listRemote,
+} from "./cloud"
+
+let pipedAnswers: string[] | null = null
+
+if (!process.stdin.isTTY) {
+  const rl = readline.createInterface({ input: process.stdin })
+  const lines: string[] = []
+  for await (const line of rl) {
+    lines.push(line.trim())
+  }
+  rl.close()
+  pipedAnswers = lines
+}
+
+function ask(query: string): Promise<string> {
+  if (pipedAnswers) {
+    const answer = pipedAnswers.shift() ?? ""
+    console.log(`${query} ${answer}`)
+    return Promise.resolve(answer)
+  }
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+  return new Promise(resolve => {
+    rl.question(query + " ", answer => { rl.close(); resolve(answer.trim()) })
+  })
+}
+
+async function askRequired(query: string, label: string): Promise<string> {
+  while (true) {
+    const answer = await ask(query)
+    if (answer) return answer
+    console.log(`${label} required.`)
+  }
+}
 
 const HELP = `boons — collaborative session artifact tool
 
 Usage:
-  boons export [--session-id <id>] [--json]   Export session to .boons/
-  boons ls [--branch <name>] [--json]          List saved sessions in .boons/
-  boons init                                    Install tools + skills
-  boons --help                                  Show this message
+  boons export [--session-id <id>] [--json]     Export session to .boons/
+  boons ls [--branch <name>] [--json]            List saved sessions
+  boons ls --remote [--branch <name>] [--json]   List remote sessions
+  boons init [<provider-flags>]                  Install tools + skills + config
+  boons config                                   Show current config
+  boons push [--session-id <id>] [--branch <b>]  Push sessions to cloud
+  boons pull [--session-id <id>] [--branch <b>]  Pull sessions from cloud
+  boons --help                                   Show this message
+
+Provider flags (for init):
+  --provider aws|gcp|azure  Cloud provider
+  --bucket <name>           Bucket name (aws/gcp)
+  --region <name>           AWS region
+  --account <name>          Azure storage account
+  --container <name>        Azure container
+  --prefix <path>           Optional key prefix in bucket
 
 Options:
-  --session-id <id>   Session to export (default: auto-detect)
-  --branch <name>     Filter by branch
+  --session-id <id>   Session to export/push/pull (default: auto-detect / all)
+  --branch <name>     Filter by branch (default: current branch)
   --json              Output as JSON (for tool integration)
-  --directory <path>  Project directory (default: current directory)
 
 Environment:
   BOONS_DB_PATH       OpenCode database path (default: ~/.local/share/opencode/opencode.db)
@@ -24,9 +75,8 @@ Environment:
 async function cmdExport(args: Record<string, string>) {
   const sessionID = args["--session-id"]
   const asJson = args["--json"] === "true"
-  const directory = args["--directory"]
 
-  const result = await exportSession({ sessionID, directory })
+  const result = await exportSession({ sessionID })
 
   if (asJson) {
     console.log(JSON.stringify(result))
@@ -37,6 +87,13 @@ async function cmdExport(args: Record<string, string>) {
 
 async function cmdLs(args: Record<string, string>) {
   const cwd = process.cwd()
+  const doRemote = args["--remote"] === "true"
+
+  if (doRemote) {
+    await cmdLsRemote(args)
+    return
+  }
+
   const boonsDir = path.join(cwd, ".boons")
   const branchFilter = args["--branch"]
   const asJson = args["--json"] === "true"
@@ -131,21 +188,123 @@ async function cmdLs(args: Record<string, string>) {
   }
 }
 
-async function cmdInit() {
+async function cmdLsRemote(args: Record<string, string>) {
+  const asJson = args["--json"] === "true"
+  const branch = args["--branch"]
+
+  try {
+    const sessions = await listRemote({ branch })
+
+    if (asJson) {
+      console.log(JSON.stringify(sessions, null, 2))
+      return
+    }
+
+    if (sessions.length === 0) {
+      const label = branch ? `branch "${branch}"` : "the current branch"
+      console.log(`No remote sessions found for ${label}.`)
+      return
+    }
+
+    const nameWidth = Math.max(...sessions.map((r) => r.name.length), 4)
+    const authorWidth = Math.max(...sessions.map((r) => r.author.length), 6)
+
+    const header = [
+      "Session ID".padEnd(28),
+      "Name".padEnd(nameWidth),
+      "Msgs".padEnd(5),
+      "Author".padEnd(authorWidth),
+    ].join("  ")
+
+    console.log(header)
+    console.log("─".repeat(header.length))
+
+    for (const r of sessions) {
+      const sid = r.sessionID.length > 26
+        ? r.sessionID.slice(0, 23) + "..."
+        : r.sessionID
+      console.log(
+        [
+          sid.padEnd(28),
+          r.name.padEnd(nameWidth),
+          (r.messageCount?.toString() ?? "?").padEnd(5),
+          r.author.padEnd(authorWidth),
+        ].join("  "),
+      )
+    }
+  } catch (err) {
+    console.error((err as Error).message)
+    process.exit(1)
+  }
+}
+
+async function cmdInit(args: Record<string, string>) {
   const cwd = process.cwd()
   const toolsDir = path.join(cwd, ".opencode", "tools")
   const skillsDir = path.join(cwd, ".opencode", "skills")
   const gitignorePath = path.join(cwd, ".gitignore")
 
-  const toolContent = `import { tool } from "@opencode-ai/plugin"
+  const exportToolContent = `import { tool } from "@opencode-ai/plugin"
 
 export default tool({
   description: "Export the current opencode session to a boons artifact directory (.boons/)",
   args: {},
   async execute(_args, context) {
-    const result = await Bun.$\`boons export --session-id \${context.sessionID} --directory \${context.directory} --json\`.text()
+    const result = await Bun.$\`boons export --session-id \${context.sessionID} --json\`.text()
     const parsed = JSON.parse(result.trim())
     return \`Exported \${parsed.messageCount} messages to \${parsed.dir}\`
+  },
+})
+`
+
+  const pushToolContent = `import { tool } from "@opencode-ai/plugin"
+
+export default tool({
+  description: "Push session artifacts for the current branch to the cloud bucket",
+  args: {
+    sessionId: { description: "Specific session ID to push", required: false },
+    branch: { description: "Branch to push sessions for (default: current)", required: false },
+  },
+  async execute(args) {
+    const parts = ["boons", "push"]
+    if (args.branch) parts.push("--branch", args.branch)
+    if (args.sessionId) parts.push("--session-id", args.sessionId)
+    const result = await Bun.$\`\${parts}\`.text()
+    return result.trim()
+  },
+})
+`
+
+  const pullToolContent = `import { tool } from "@opencode-ai/plugin"
+
+export default tool({
+  description: "Pull session artifacts for the current branch from the cloud bucket",
+  args: {
+    sessionId: { description: "Specific session ID to pull", required: false },
+    branch: { description: "Branch to pull sessions for (default: current)", required: false },
+  },
+  async execute(args) {
+    const parts = ["boons", "pull"]
+    if (args.branch) parts.push("--branch", args.branch)
+    if (args.sessionId) parts.push("--session-id", args.sessionId)
+    const result = await Bun.$\`\${parts}\`.text()
+    return result.trim()
+  },
+})
+`
+
+  const listRemoteToolContent = `import { tool } from "@opencode-ai/plugin"
+
+export default tool({
+  description: "List remote sessions available for the current branch",
+  args: {
+    branch: { description: "Branch to list sessions for (default: current)", required: false },
+  },
+  async execute(args) {
+    const parts = ["boons", "ls", "--remote", "--json"]
+    if (args.branch) parts.push("--branch", args.branch)
+    const result = await Bun.$\`\${parts}\`.text()
+    return result.trim()
   },
 })
 `
@@ -241,25 +400,229 @@ Use \`boons ls\` when:
    (\`plan.md\`, \`decisions.md\`, etc.).
 `
 
-  await Bun.$`mkdir -p ${toolsDir} ${path.join(skillsDir, "session-save")} ${path.join(skillsDir, "session-load")}`
-  await Bun.write(path.join(toolsDir, "export-session.ts"), toolContent)
+  const pushSkillContent = `---
+name: session-push
+description: Push session artifacts to a shared cloud bucket
+---
+
+## What this does
+
+Provides the \`session-push\` tool that uploads local session artifacts
+for the current branch to the configured cloud bucket. This makes sessions
+visible to teammates who pull from the same bucket.
+
+## When to use this
+
+Call \`session-push\` when:
+- The user asks to share sessions with the team
+- Before creating or marking a PR as ready for review
+- After exporting sessions that contain important context for reviewers
+- At natural synchronization points during collaboration
+
+## Before first push
+
+Make sure your cloud bucket has **object versioning** enabled. This gives you
+the ability to recover from accidental overwrites — boons doesn't prevent
+overwriting sessions, so versioning is your safety net.
+
+## Default behavior
+
+\`session-push\` pushes all sessions for the current branch by default. Use
+the \`branch\` and \`sessionId\` arguments explicitly only when you need to
+push sessions from a different context.
+
+## Selective sharing
+
+If a session contains sensitive or irrelevant content, you may be asked to
+curate it before pushing. Remove private messages from the session's
+\`raw.jsonl\` and update \`info.json\` as needed. The push tool will upload
+whatever is in the local session directory.
+`
+
+  const pullSkillContent = `---
+name: session-pull
+description: Pull session artifacts from a shared cloud bucket
+---
+
+## What this does
+
+Provides the \`session-pull\` tool that downloads session artifacts for the
+current branch from the configured cloud bucket. This is how a collaborator
+or reviewer fetches context created by others.
+
+## When to use this
+
+Call \`session-pull\` when:
+- Starting work on a branch that may have shared sessions
+- Before reviewing work on a branch — this gives context from the author
+- The user asks to see what sessions are available
+
+## Workflow
+
+1. First run \`session-list-remote\` (or \`boons ls --remote\`) to see what
+   sessions exist for the current branch
+2. Then run \`session-pull\` to fetch them into \`.boons/<branch>/\`
+3. After pulling, use \`session-load\` guidance to read them
+
+## Default behavior
+
+\`session-pull\` pulls all sessions for the current branch by default. Use the
+\`branch\` argument to pull sessions from a different branch context, or
+\`sessionId\` to pull a specific session.
+`
+
+  await Bun.$`mkdir -p ${toolsDir} ${path.join(skillsDir, "session-save")} ${path.join(skillsDir, "session-load")} ${path.join(skillsDir, "session-push")} ${path.join(skillsDir, "session-pull")}`
+  await Bun.write(path.join(toolsDir, "export-session.ts"), exportToolContent)
+  await Bun.write(path.join(toolsDir, "session-push.ts"), pushToolContent)
+  await Bun.write(path.join(toolsDir, "session-pull.ts"), pullToolContent)
+  await Bun.write(path.join(toolsDir, "session-list-remote.ts"), listRemoteToolContent)
   await Bun.write(path.join(skillsDir, "session-save", "SKILL.md"), saveSkillContent)
   await Bun.write(path.join(skillsDir, "session-load", "SKILL.md"), loadSkillContent)
+  await Bun.write(path.join(skillsDir, "session-push", "SKILL.md"), pushSkillContent)
+  await Bun.write(path.join(skillsDir, "session-pull", "SKILL.md"), pullSkillContent)
 
-  try {
-    const existing = await Bun.file(gitignorePath).text()
-    if (!existing.split("\n").some((l) => l.trim() === ".boons/")) {
-      await Bun.write(gitignorePath, existing + "\n.boons/\n")
-      console.log("Appended .boons/ to .gitignore")
-    }
-  } catch {
-    await Bun.write(gitignorePath, ".boons/\n")
-    console.log("Created .gitignore with .boons/")
+  await configureCloud(cwd, args)
+
+  const gitignoreContent = (() => {
+    try { return fs.readFileSync(gitignorePath, "utf-8") } catch { return "" }
+  })()
+
+  const lines = gitignoreContent.split("\n")
+  const hasBoons = lines.some((l) => l.trim() === ".boons/")
+  const hasException = lines.some((l) => l.trim() === "!.boons/config.json")
+
+  let updated = gitignoreContent
+  if (!hasException && hasBoons) {
+    updated = updated.replace(".boons/", ".boons/\n!.boons/config.json")
+  } else if (!hasBoons) {
+    updated = (updated.endsWith("\n") ? updated : updated + "\n") + ".boons/\n!.boons/config.json\n"
+  }
+  if (updated !== gitignoreContent) {
+    fs.writeFileSync(gitignorePath, updated)
+    console.log("Updated .gitignore with .boons/ entries")
   }
 
-  console.log(`Installed export-session tool to ${toolsDir}`)
-  console.log(`Installed session-save skill to ${path.join(skillsDir, "session-save")}`)
-  console.log(`Installed session-load skill to ${path.join(skillsDir, "session-load")}`)
+  console.log(`Installed tools to ${toolsDir}`)
+  console.log(`Installed skills to ${skillsDir}`)
+}
+
+async function configureCloud(cwd: string, args: Record<string, string>) {
+  const providerFlag = args["--provider"]
+  const hasFlags = providerFlag || args["--bucket"] || args["--account"] || args["--container"]
+
+  if (hasFlags) {
+    const remote: Record<string, string> = { provider: providerFlag || "" }
+    if (args["--bucket"]) remote.bucket = args["--bucket"]
+    if (args["--region"]) remote.region = args["--region"]
+    if (args["--account"]) remote.account = args["--account"]
+    if (args["--container"]) remote.container = args["--container"]
+    if (args["--prefix"]) remote.prefix = args["--prefix"]
+    writeConfig({ remote: remote as any }, cwd)
+    console.log(`Configured remote: ${providerFlag}${remote.bucket ? ` (bucket: ${remote.bucket})` : ""}${remote.account ? ` (account: ${remote.account})` : ""}`)
+    return
+  }
+
+  const answer = await ask("Configure cloud remote for sharing sessions? (y/N)")
+  if (answer.toLowerCase() !== "y" && answer.toLowerCase() !== "yes") return
+
+  const provider = await ask("Cloud provider (aws/gcp/azure):")
+  const valid = ["aws", "gcp", "azure"]
+  if (!valid.includes(provider)) {
+    console.log(`Skipping: unsupported provider "${provider}". Use aws, gcp, or azure.`)
+    return
+  }
+
+  const remote: Record<string, string> = { provider }
+
+  if (provider === "aws") {
+    const bucket = await askRequired("AWS S3 bucket name:", "Bucket name")
+    remote.bucket = bucket
+    const region = await ask("AWS region (optional, press Enter to skip):")
+    if (region) remote.region = region
+  } else if (provider === "gcp") {
+    const bucket = await askRequired("GCS bucket name:", "Bucket name")
+    remote.bucket = bucket
+  } else if (provider === "azure") {
+    const account = await askRequired("Azure storage account name:", "Account name")
+    remote.account = account
+    const container = await askRequired("Azure container name:", "Container name")
+    remote.container = container
+  }
+
+  const prefix = await ask("Key prefix (optional, press Enter to skip):")
+  if (prefix) remote.prefix = prefix
+
+  writeConfig({ remote: remote as any }, cwd)
+  console.log(`Configured remote: ${provider}${remote.bucket ? ` (bucket: ${remote.bucket})` : ""}${remote.account ? ` (account: ${remote.account})` : ""}`)
+}
+
+async function cmdConfig() {
+  const config = readConfig()
+  if (!config.remote) {
+    console.log("No remote configured.")
+    console.log("Run `boons init --provider aws|gcp|azure --bucket <name>` to set one up.")
+    return
+  }
+  console.log(JSON.stringify(config, null, 2))
+}
+
+async function cmdPush(args: Record<string, string>) {
+  const asJson = args["--json"] === "true"
+  const sessionID = args["--session-id"]
+  const branch = args["--branch"]
+
+  try {
+    const result = await push({ sessionID, branch })
+    if (asJson) {
+      console.log(JSON.stringify(result))
+    } else {
+      console.log(`Pushed ${result.pushed} session(s) for branch "${result.branch}"`)
+      for (const s of result.sessions) {
+        console.log(`  ${s}`)
+      }
+    }
+  } catch (err) {
+    console.error((err as Error).message)
+    process.exit(1)
+  }
+}
+
+async function cmdPull(args: Record<string, string>) {
+  const asJson = args["--json"] === "true"
+  const sessionID = args["--session-id"]
+  const branch = args["--branch"]
+
+  try {
+    const result = await pull({ sessionID, branch })
+    if (asJson) {
+      console.log(JSON.stringify(result))
+    } else {
+      console.log(`Pulled ${result.pulled} session(s) for branch "${result.branch}"`)
+      for (const s of result.sessions) {
+        console.log(`  ${s}`)
+      }
+    }
+  } catch (err) {
+    console.error((err as Error).message)
+    process.exit(1)
+  }
+}
+
+function parseArgs(args: string[]): Record<string, string> {
+  const opts: Record<string, string> = {}
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
+    if (a.startsWith("--")) {
+      const val = args[i + 1]
+      if (val !== undefined && !val.startsWith("--")) {
+        opts[a] = val
+        i++
+      } else {
+        opts[a] = "true"
+      }
+    }
+  }
+  return opts
 }
 
 async function main() {
@@ -271,43 +634,31 @@ async function main() {
   }
 
   const cmd = args[0]
+  const opts = parseArgs(args.slice(1))
 
-  if (cmd === "export") {
-    const opts: Record<string, string> = {}
-    for (let i = 1; i < args.length; i++) {
-      const a = args[i]
-      if (a.startsWith("--")) {
-        const val = args[i + 1]
-        if (val !== undefined && !val.startsWith("--")) {
-          opts[a] = val
-          i++
-        } else {
-          opts[a] = "true"
-        }
-      }
-    }
-    await cmdExport(opts)
-  } else if (cmd === "ls") {
-    const opts: Record<string, string> = {}
-    for (let i = 1; i < args.length; i++) {
-      const a = args[i]
-      if (a.startsWith("--")) {
-        const val = args[i + 1]
-        if (val !== undefined && !val.startsWith("--")) {
-          opts[a] = val
-          i++
-        } else {
-          opts[a] = "true"
-        }
-      }
-    }
-    await cmdLs(opts)
-  } else if (cmd === "init") {
-    await cmdInit()
-  } else {
-    console.error(`Unknown command: ${cmd}`)
-    console.log(HELP)
-    process.exit(1)
+  switch (cmd) {
+    case "export":
+      await cmdExport(opts)
+      break
+    case "ls":
+      await cmdLs(opts)
+      break
+    case "init":
+      await cmdInit(opts)
+      break
+    case "config":
+      await cmdConfig()
+      break
+    case "push":
+      await cmdPush(opts)
+      break
+    case "pull":
+      await cmdPull(opts)
+      break
+    default:
+      console.error(`Unknown command: ${cmd}`)
+      console.log(HELP)
+      process.exit(1)
   }
 }
 

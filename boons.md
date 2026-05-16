@@ -223,6 +223,8 @@ Remotely, artifacts live in a cloud bucket mirroring the local directory structu
 
 This resolves the remote storage question without touching the git repository — no ref pollution, no history bloat, no LFS complexity. The bucket is a simple file store that mirrors the local structure, navigable directly in any cloud storage browser if needed.
 
+**Cloud versioning.** Boons deliberately avoids write locks or overwrite prevention — sessions are artifacts meant to be created and updated freely. If you want provenance and recovery on the remote side, enable **object versioning** on the cloud bucket. This gives you an undo for accidental overwrites and a complete history of session revisions, analogous to how git stores your commit history. Versioning is a one-time bucket-level setting on all three providers: `aws s3api put-bucket-versioning`, `gcloud storage buckets update`, or Azure's `--versioning-level Enabled`.
+
 ### Skills
 
 A small set of skills exposes the storage layer to agents and developers. The core verbs are push and pull, mirroring git's model intentionally:

@@ -1,0 +1,58 @@
+import * as path from "path"
+import { Glob } from "bun"
+import { readConfig } from "./config"
+import { createProvider } from "./factory"
+import { getBranch } from "../git"
+
+export interface PushOptions {
+  sessionID?: string
+  branch?: string
+  directory?: string
+}
+
+export interface PushResult {
+  pushed: number
+  sessions: string[]
+  branch: string
+}
+
+export async function push(opts: PushOptions): Promise<PushResult> {
+  const cwd = opts.directory ?? process.cwd()
+  const config = readConfig(cwd)
+  if (!config.remote) throw new Error("No remote configured. Run `boons init --provider <name> --bucket <name>` first.")
+
+  const provider = createProvider(config.remote)
+  const branch = opts.branch ?? getBranch(cwd)
+  const remoteBase = config.remote.prefix
+    ? path.posix.join(config.remote.prefix, branch)
+    : branch
+
+  const boonsDir = path.join(cwd, ".boons", branch)
+  const pattern = opts.sessionID
+    ? `${branch}/${opts.sessionID}/info.json`
+    : `${branch}/*/info.json`
+
+  const glob = new Glob(pattern)
+  const sessions: string[] = []
+
+  for await (const match of glob.scan(path.join(cwd, ".boons"))) {
+    const parts = match.split("/")
+    const sessionID = parts[1]
+    sessions.push(sessionID)
+  }
+
+  if (sessions.length === 0) {
+    const detail = opts.sessionID
+      ? `session ${opts.sessionID}`
+      : "any sessions"
+    throw new Error(`No saved sessions found for branch "${branch}" (${detail}). Export sessions first with \`boons export\`.`)
+  }
+
+  for (const sessionID of sessions) {
+    const localDir = path.join(boonsDir, sessionID)
+    const remoteDir = path.posix.join(remoteBase, sessionID)
+    await provider.uploadDir(localDir, remoteDir)
+  }
+
+  return { pushed: sessions.length, sessions, branch }
+}

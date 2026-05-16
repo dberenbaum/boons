@@ -1,6 +1,6 @@
 export type { CloudStorage } from "./provider"
-export { readConfig, writeConfig, configPath } from "./config"
-export type { Config, RemoteConfig } from "./config"
+export { readConfig, writeConfig, writeGlobalConfig, configPath, resolveConfig, getRepoKey, readGlobalConfig, globalConfigPath } from "./config"
+export type { Config, RemoteConfig, GlobalConfig, ResolvedConfig } from "./config"
 export { createProvider } from "./factory"
 export { push } from "./push"
 export { pull } from "./pull"

@@ -1,6 +1,6 @@
 import * as path from "path"
 import * as os from "os"
-import { readConfig } from "./config"
+import { resolveConfig } from "./config"
 import { createProvider } from "./factory"
 import { getBranch } from "../git"
 
@@ -19,13 +19,14 @@ export interface ListRemoteOptions {
 
 export async function listRemote(opts: ListRemoteOptions): Promise<RemoteSession[]> {
   const cwd = opts.directory ?? process.cwd()
-  const config = readConfig(cwd)
-  if (!config.remote) throw new Error("No remote configured. Run `boons init --provider <name> --bucket <name>` first.")
+  const resolved = resolveConfig(cwd)
+  if (!resolved) throw new Error("No remote configured. Run `boons init --provider <name> --bucket <name>` or set up ~/.config/boons/config.json first.")
+  const remote = resolved.remote
 
-  const provider = createProvider(config.remote)
+  const provider = createProvider(remote)
   const branch = opts.branch ?? getBranch(cwd)
-  const remoteBase = config.remote.prefix
-    ? path.posix.join(config.remote.prefix, branch)
+  const remoteBase = remote.prefix
+    ? path.posix.join(remote.prefix, branch)
     : branch
 
   const sessionIDs = await provider.listDirs(remoteBase)

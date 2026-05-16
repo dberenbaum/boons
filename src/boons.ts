@@ -7,6 +7,10 @@ import { exportSession } from "./export"
 import {
   readConfig,
   writeConfig,
+  writeGlobalConfig,
+  readGlobalConfig,
+  getRepoKey,
+  resolveConfig,
   push,
   pull,
   listRemote,
@@ -64,6 +68,7 @@ Provider flags (for init):
   --account <name>          Azure storage account
   --container <name>        Azure container
   --prefix <path>           Optional key prefix in bucket
+  --global                  Write to ~/.config/boons/config.json (repo-keyed) instead of .boons/config.json
 
 Options:
   --session-id <id>   Session to export/push/pull (default: auto-detect / all)
@@ -242,10 +247,13 @@ async function cmdLsRemote(args: Record<string, string>) {
 
 async function cmdInit(args: Record<string, string>) {
   const cwd = process.cwd()
+  const target = args["--global"] === "true" ? "repo-keyed" : "per-repo"
+
+  await configureCloud(cwd, args, target)
+
+  if (target !== "per-repo") return
+
   const gitignorePath = path.join(cwd, ".gitignore")
-
-  await configureCloud(cwd, args)
-
   const gitignoreContent = (() => {
     try { return fs.readFileSync(gitignorePath, "utf-8") } catch { return "" }
   })()
@@ -266,7 +274,7 @@ async function cmdInit(args: Record<string, string>) {
   }
 }
 
-async function configureCloud(cwd: string, args: Record<string, string>) {
+async function configureCloud(cwd: string, args: Record<string, string>, target: "per-repo" | "repo-keyed" | "global-default") {
   const providerFlag = args["--provider"]
   const hasFlags = providerFlag || args["--bucket"] || args["--account"] || args["--container"]
 
@@ -277,19 +285,29 @@ async function configureCloud(cwd: string, args: Record<string, string>) {
     if (args["--account"]) remote.account = args["--account"]
     if (args["--container"]) remote.container = args["--container"]
     if (args["--prefix"]) remote.prefix = args["--prefix"]
-    writeConfig({ remote: remote as any }, cwd)
+    writeConfigTarget(target, { remote: remote as any }, cwd)
     console.log(`Configured remote: ${providerFlag}${remote.bucket ? ` (bucket: ${remote.bucket})` : ""}${remote.account ? ` (account: ${remote.account})` : ""}`)
     return
   }
 
-  const answer = await ask("Configure cloud remote for sharing sessions? (y/N)")
-  if (answer.toLowerCase() !== "y" && answer.toLowerCase() !== "yes") return
+  const remote = await askRemoteConfig()
+  if (!remote) return
+
+  writeConfigTarget(target, { remote }, cwd)
+  console.log(`Configured remote: ${remote.provider}${remote.bucket ? ` (bucket: ${remote.bucket})` : ""}${remote.account ? ` (account: ${remote.account})` : ""}`)
+}
+
+async function askRemoteConfig(skipConfirm = false): Promise<RemoteConfig | null> {
+  if (!skipConfirm) {
+    const answer = await ask("Configure cloud remote for sharing sessions? (y/N)")
+    if (answer.toLowerCase() !== "y" && answer.toLowerCase() !== "yes") return null
+  }
 
   const provider = await ask("Cloud provider (aws/gcp/azure):")
   const valid = ["aws", "gcp", "azure"]
   if (!valid.includes(provider)) {
     console.log(`Skipping: unsupported provider "${provider}". Use aws, gcp, or azure.`)
-    return
+    return null
   }
 
   const remote: Record<string, string> = { provider }
@@ -312,8 +330,29 @@ async function configureCloud(cwd: string, args: Record<string, string>) {
   const prefix = await ask("Key prefix (optional, press Enter to skip):")
   if (prefix) remote.prefix = prefix
 
-  writeConfig({ remote: remote as any }, cwd)
-  console.log(`Configured remote: ${provider}${remote.bucket ? ` (bucket: ${remote.bucket})` : ""}${remote.account ? ` (account: ${remote.account})` : ""}`)
+  return remote as RemoteConfig
+}
+
+function writeConfigTarget(target: "per-repo" | "repo-keyed" | "global-default", config: Config, cwd: string): void {
+  if (target === "global-default") {
+    const globalCfg = readGlobalConfig()
+    globalCfg.default = config.remote!
+    writeGlobalConfig(globalCfg)
+    console.log("Wrote to ~/.config/boons/config.json (default)")
+  } else if (target === "repo-keyed") {
+    const repoKey = getRepoKey(cwd)
+    if (!repoKey) {
+      console.error("No git remote origin found. Cannot write repo-keyed global config.")
+      process.exit(1)
+    }
+    const globalCfg = readGlobalConfig()
+    if (!globalCfg.repos) globalCfg.repos = {}
+    globalCfg.repos[repoKey] = config.remote!
+    writeGlobalConfig(globalCfg)
+    console.log(`Wrote to ~/.config/boons/config.json (repos.${repoKey})`)
+  } else {
+    writeConfig(config, cwd)
+  }
 }
 
 async function cmdInstall(tool: string) {
@@ -588,17 +627,30 @@ Only use in projects with a \`.boons/\` directory.
 
     console.log(`Installed boons tools to ${toolsDir}`)
     console.log(`Installed boons skills to ${skillsDir}`)
+
+    const globalCfg = readGlobalConfig()
+    if (!globalCfg.default) {
+      const answer = await ask("Set up a global default cloud config for sharing sessions? (y/N)")
+      if (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes") {
+        const remote = await askRemoteConfig(true)
+        if (remote) {
+          writeConfigTarget("global-default", { remote }, process.cwd())
+          console.log(`Configured default: ${remote.provider}${remote.bucket ? ` (bucket: ${remote.bucket})` : ""}${remote.account ? ` (account: ${remote.account})` : ""}`)
+        }
+      }
+    }
   }
 }
 
 async function cmdConfig() {
-  const config = readConfig()
-  if (!config.remote) {
+  const resolved = resolveConfig()
+  if (!resolved) {
     console.log("No remote configured.")
-    console.log("Run `boons init --provider aws|gcp|azure --bucket <name>` to set one up.")
+    console.log("Run `boons init --provider aws|gcp|azure --bucket <name>` or set up ~/.config/boons/config.json")
     return
   }
-  console.log(JSON.stringify(config, null, 2))
+  console.log(`Source: ${resolved.source}`)
+  console.log(JSON.stringify(resolved.remote, null, 2))
 }
 
 async function cmdPush(args: Record<string, string>) {

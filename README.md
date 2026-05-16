@@ -44,6 +44,15 @@ Here are the natural-language triggers and what they do:
 - **"Find sessions related to the authentication refactor"** — The
   agent runs `session-list-remote`, reads summaries and logs, and
   presents the relevant context.
+- **"Did Molly discuss why she chose this architecture?"** — The
+  agent searches sessions (local or pulled) for discussions by or
+  about a specific person, returning their reasoning and decisions.
+- **"Draft a PR description from the sessions on this branch"** —
+  The agent reads all summaries and decision docs across sessions
+  and synthesizes a PR description grounded in the actual work.
+- **"What questions are still open on this branch?"** — The agent
+  searches summaries for uncertainties, unresolved decisions, and
+  flagged risks, giving a concise status of what's unsettled.
 
 ### Other tools
 

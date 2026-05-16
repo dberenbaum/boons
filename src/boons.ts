@@ -262,14 +262,11 @@ export default tool({
 export default tool({
   description: "Push session artifacts for the current branch to the cloud bucket",
   args: {
-    sessionId: { description: "Specific session ID to push", required: false },
-    branch: { description: "Branch to push sessions for (default: current)", required: false },
+    sessionId: tool.schema.string().optional(),
+    branch: tool.schema.string().optional(),
   },
   async execute(args) {
-    const parts = ["boons", "push"]
-    if (args.branch) parts.push("--branch", args.branch)
-    if (args.sessionId) parts.push("--session-id", args.sessionId)
-    const result = await Bun.$\`\${parts}\`.text()
+    const result = await Bun.$\`boons push \${args.branch ? ["--branch", args.branch] : []} \${args.sessionId ? ["--session-id", args.sessionId] : []}\`.text()
     return result.trim()
   },
 })
@@ -280,14 +277,11 @@ export default tool({
 export default tool({
   description: "Pull session artifacts for the current branch from the cloud bucket",
   args: {
-    sessionId: { description: "Specific session ID to pull", required: false },
-    branch: { description: "Branch to pull sessions for (default: current)", required: false },
+    sessionId: tool.schema.string().optional(),
+    branch: tool.schema.string().optional(),
   },
   async execute(args) {
-    const parts = ["boons", "pull"]
-    if (args.branch) parts.push("--branch", args.branch)
-    if (args.sessionId) parts.push("--session-id", args.sessionId)
-    const result = await Bun.$\`\${parts}\`.text()
+    const result = await Bun.$\`boons pull \${args.branch ? ["--branch", args.branch] : []} \${args.sessionId ? ["--session-id", args.sessionId] : []}\`.text()
     return result.trim()
   },
 })
@@ -298,12 +292,10 @@ export default tool({
 export default tool({
   description: "List remote sessions available for the current branch",
   args: {
-    branch: { description: "Branch to list sessions for (default: current)", required: false },
+    branch: tool.schema.string().optional(),
   },
   async execute(args) {
-    const parts = ["boons", "ls", "--remote", "--json"]
-    if (args.branch) parts.push("--branch", args.branch)
-    const result = await Bun.$\`\${parts}\`.text()
+    const result = await Bun.$\`boons ls --remote --json \${args.branch ? ["--branch", args.branch] : []}\`.text()
     return result.trim()
   },
 })

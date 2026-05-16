@@ -3,12 +3,10 @@ import { tool } from "@opencode-ai/plugin"
 export default tool({
   description: "List remote sessions available for the current branch",
   args: {
-    branch: { description: "Branch to list sessions for (default: current)", required: false },
+    branch: tool.schema.string().optional(),
   },
   async execute(args) {
-    const parts = ["boons", "ls", "--remote", "--json"]
-    if (args.branch) parts.push("--branch", args.branch)
-    const result = await Bun.$`${parts}`.text()
+    const result = await Bun.$`boons ls --remote --json ${args.branch ? ["--branch", args.branch] : []}`.text()
     return result.trim()
   },
 })

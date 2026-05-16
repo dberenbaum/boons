@@ -27,7 +27,23 @@ curl -fsSL https://raw.githubusercontent.com/dberenbaum/boons/main/install.sh | 
 boons install opencode
 ```
 
-The install prompts you to configure cloud storage. After that, `session-save`, `session-push`, `session-pull`, and `session-list-remote` are available inside Open Code.
+The install prompts you to configure cloud storage. After that, `session-save`, `session-push`, `session-pull`, and `session-list-remote` are available from inside your agent, regardless of which tool you use.
+
+## Agent Workflow
+
+Once boons is installed, all interaction happens through your agent.
+Here are the natural-language triggers and what they do:
+
+- **"Save this session"** — The agent calls `session-save`, writes a
+  summary of what was accomplished, and creates the artifact in
+  `.boons/<branch>/<session-id>/`.
+- **"Push all sessions on this branch"** — The agent calls
+  `session-push`, syncing local artifacts to the cloud bucket.
+- **"Pull sessions for this branch"** — The agent calls `session-pull`,
+  fetching artifacts from the cloud bucket.
+- **"Find sessions related to the authentication refactor"** — The
+  agent runs `session-list-remote`, reads summaries and logs, and
+  presents the relevant context.
 
 ### Other tools
 

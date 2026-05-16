@@ -101,6 +101,7 @@ Usage:
                                                      Export session to .boons/
   boons ls [--branch <name>] [--json]                 List saved sessions
   boons ls --remote [--branch <name>] [--json]        List remote sessions
+  boons init [-q | --quiet]                           Create .boons/ dir + update .gitignore (non-interactive)
   boons init [<provider-flags>]                       Configure cloud remote for repo
   boons install <toolname>                            Install tools + skills for a tool
   boons config                                        Show current config
@@ -311,8 +312,15 @@ async function cmdLsRemote(args: Record<string, string>) {
 async function cmdInit(args: Record<string, string>) {
   const cwd = process.cwd()
   const target = args["--global"] === "true" ? "repo-keyed" : "per-repo"
+  const quiet = args["-q"] === "true" || args["--quiet"] === "true"
 
-  await configureCloud(cwd, args, target)
+  if (quiet) {
+    const boonsDir = path.join(cwd, ".boons")
+    fs.mkdirSync(boonsDir, { recursive: true })
+    console.log(`Created ${boonsDir}`)
+  } else {
+    await configureCloud(cwd, args, target)
+  }
 
   if (target !== "per-repo") return
 
@@ -449,7 +457,11 @@ export default tool({
   },
   async execute(args, context) {
     if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
-      return "This project does not have a .boons/ directory. Run \`boons init\` to configure cloud sharing."
+      try {
+        await Bun.$\`boons init -q\`
+      } catch {
+        return "boons is not available. Install it from https://github.com/anomalyco/boons"
+      }
     }
     const result = await Bun.$\`boons export --tool opencode --session-id \${context.sessionID} --summary \${args.summary} --json\`.text()
     return result.trim()
@@ -469,7 +481,11 @@ export default tool({
   },
   async execute(args, context) {
     if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
-      return "This project does not have a .boons/ directory. Run \`boons init\` to configure cloud sharing."
+      try {
+        await Bun.$\`boons init -q\`
+      } catch {
+        return "boons is not available. Install it from https://github.com/anomalyco/boons"
+      }
     }
     const result = await Bun.$\`boons push \${args.branch ? ["--branch", args.branch] : []} \${args.sessionId ? ["--session-id", args.sessionId] : []}\`.text()
     return result.trim()
@@ -489,7 +505,11 @@ export default tool({
   },
   async execute(args, context) {
     if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
-      return "This project does not have a .boons/ directory. Run \`boons init\` to configure cloud sharing."
+      try {
+        await Bun.$\`boons init -q\`
+      } catch {
+        return "boons is not available. Install it from https://github.com/anomalyco/boons"
+      }
     }
     const result = await Bun.$\`boons pull \${args.branch ? ["--branch", args.branch] : []} \${args.sessionId ? ["--session-id", args.sessionId] : []}\`.text()
     return result.trim()
@@ -508,9 +528,37 @@ export default tool({
   },
   async execute(args, context) {
     if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
-      return "This project does not have a .boons/ directory. Run \`boons init\` to configure cloud sharing."
+      try {
+        await Bun.$\`boons init -q\`
+      } catch {
+        return "boons is not available. Install it from https://github.com/anomalyco/boons"
+      }
     }
     const result = await Bun.$\`boons ls --remote --json \${args.branch ? ["--branch", args.branch] : []}\`.text()
+    return result.trim()
+  },
+})
+`
+
+  const listToolContent = `import { tool } from "@opencode-ai/plugin"
+import * as fs from "fs"
+import * as path from "path"
+
+export default tool({
+  description: "List available local sessions for a branch from the .boons/ directory",
+  args: {
+    branch: tool.schema.string().optional(),
+  },
+  async execute(args, context) {
+    const boonsDir = path.join(context.worktree, ".boons")
+    if (!fs.existsSync(boonsDir)) {
+      try {
+        await Bun.$\`boons init -q\`
+      } catch {
+        return "boons is not available. Install it from https://github.com/anomalyco/boons"
+      }
+    }
+    const result = await Bun.$\`boons ls \${args.branch ? ["--branch", args.branch] : []} --json\`.text()
     return result.trim()
   },
 })
@@ -539,7 +587,13 @@ Call \`export-session\` when:
 - Before switching branches — suggest it
 - At natural stopping points in the conversation
 
-Only use in projects with a \`.boons/\` directory.
+## Handling uninitialized projects
+
+- **User explicitly asks** to save or export: just call \`export-session\`.
+  It auto-initializes boons if needed.
+- **Agent-proactive suggestion** (commit, milestone, branch switch, natural
+  stopping point): first check if \`.boons/\` exists. If not, skip the suggestion
+  or suggest running \`boons init -q\`.
 
 ## Using the tool
 
@@ -596,18 +650,24 @@ To see which files are present for a particular session, list its directory.
 
 ## When to use this
 
-Use \`boons ls\` when:
+Use the \`session-list\` tool when:
 - The user explicitly asks about prior decisions or context
 - After switching to a new branch — suggest loading saved sessions for that branch
 - When reviewing someone else's work on a branch — suggest loading their sessions
 
-Only use in projects with a \`.boons/\` directory.
+## Handling uninitialized projects
+
+- **User explicitly asks** about prior context or sessions: just call the
+  \`session-list\` tool. It auto-initializes boons if needed.
+- **Agent-proactive suggestion** (branch switch, review): first check if
+  \`.boons/\` exists. If not, suggest running \`boons init -q\` instead of
+  loading sessions.
 
 ## Discovery workflow
 
-1. Run \`boons ls [--branch <name>]\` to see what sessions exist.
-   This shows session names, message counts, and which extra files
-   (summary, plan, decisions, etc.) are available.
+1. Call the \`session-list\` tool (optionally with \`branch\`) to see what
+   sessions exist. It returns JSON with session names, message counts,
+   and which extra files (summary, plan, decisions, etc.) are available.
 2. For sessions that look relevant, read \`summary.md\` first for
    a concise overview and key decisions.
 3. If more detail is needed, read \`raw.jsonl\` — each line is a JSON
@@ -635,9 +695,15 @@ Call \`session-push\` when:
 - Before pushing to the remote repository — ask the user
 - Before creating or marking a PR as ready for review — ask the user
 
-Only use in projects with a \`.boons/\` directory. **Always ask the user before running** — this shares session data with others.
+**Always ask the user before running** — this shares session data with others.
 
+## Handling uninitialized projects
 
+- **User explicitly asks** to push or share: just call \`session-push\`. It
+  auto-initializes boons if needed.
+- **Agent-proactive suggestion** (before push, before PR): first check if
+  \`.boons/\` exists. If not, suggest running \`boons init -q\` instead of
+  pushing. Always ask the user before running.
 
 ## Before first push
 
@@ -677,7 +743,13 @@ Call \`session-pull\` when:
 - After pulling from the remote repository — suggest it
 - Before reviewing work on a branch — suggest fetching context from collaborators
 
-Only use in projects with a \`.boons/\` directory.
+## Handling uninitialized projects
+
+- **User explicitly asks** to fetch remote sessions: just call \`session-pull\`.
+  It auto-initializes boons if needed.
+- **Agent-proactive suggestion** (after git pull, before review): first check
+  if \`.boons/\` exists. If not, skip the suggestion or suggest running
+  \`boons init -q\`.
 
 ## Workflow
 
@@ -700,6 +772,7 @@ Only use in projects with a \`.boons/\` directory.
   await Bun.write(path.join(toolsDir, "session-push.ts"), pushToolContent)
   await Bun.write(path.join(toolsDir, "session-pull.ts"), pullToolContent)
   await Bun.write(path.join(toolsDir, "session-list-remote.ts"), listRemoteToolContent)
+  await Bun.write(path.join(toolsDir, "session-list.ts"), listToolContent)
   await Bun.write(path.join(skillsDir, "session-save", "SKILL.md"), saveSkillContent)
   await Bun.write(path.join(skillsDir, "session-load", "SKILL.md"), loadSkillContent)
   await Bun.write(path.join(skillsDir, "session-push", "SKILL.md"), pushSkillContent)
@@ -1151,6 +1224,8 @@ function parseArgs(args: string[]): Record<string, string> {
       } else {
         opts[a] = "true"
       }
+    } else if (a.startsWith("-") && a.length === 2) {
+      opts[a] = "true"
     }
   }
   return opts

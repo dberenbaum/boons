@@ -1,4 +1,5 @@
 import * as path from "path"
+import * as fs from "fs"
 import { resolveConfig, getRepoKey } from "./config"
 import { createProvider } from "./factory"
 import { getBranch } from "../git"
@@ -45,6 +46,7 @@ export async function pull(opts: PullOptions): Promise<PullResult> {
   for (const sessionID of sessionIDs) {
     const localDir = path.join(cwd, ".boons", branch, sessionID)
     const remoteDir = path.posix.join(remoteBase, sessionID)
+    fs.mkdirSync(localDir, { recursive: true })
     await provider.downloadDir(remoteDir, localDir)
   }
 

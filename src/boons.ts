@@ -822,14 +822,7 @@ Call \`session-pull\` when:
 }
 
 async function installClaudeCode() {
-  const pluginDir = path.join(os.homedir(), ".claude", "plugins", "boons")
-  const skillsDir = path.join(pluginDir, "skills")
-
-  const pluginJson = JSON.stringify({
-    name: "boons",
-    description: "Export, share, and load session artifacts from .boons/ archives. Provides workflow guidance for saving sessions, pushing/pulling session archives to cloud storage, and loading prior session context for code review and collaboration.",
-    author: { name: "boons" },
-  }, null, 2) + "\n"
+  const userSkillsDir = path.join(os.homedir(), ".claude", "skills")
 
   const saveSkillContent = `---
 name: boons-session-save
@@ -1014,66 +1007,13 @@ Only use in projects with a \`.boons/\` directory.
     { name: "session-pull", content: pullSkillContent },
   ]
 
-  for (const dir of [path.join(pluginDir, ".claude-plugin"), ...skills.map(s => path.join(skillsDir, s.name))]) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
-
-  await Bun.write(path.join(pluginDir, ".claude-plugin", "plugin.json"), pluginJson)
   for (const skill of skills) {
-    await Bun.write(path.join(skillsDir, skill.name, "SKILL.md"), skill.content)
+    const dir = path.join(userSkillsDir, skill.name)
+    fs.mkdirSync(dir, { recursive: true })
+    await Bun.write(path.join(dir, "SKILL.md"), skill.content)
   }
 
-  // Register in installed_plugins.json
-  const installedPluginsPath = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json")
-  let installedPlugins: { version: number; plugins: Record<string, unknown[]> }
-  try {
-    const raw = fs.readFileSync(installedPluginsPath, "utf-8")
-    installedPlugins = JSON.parse(raw)
-  } catch {
-    installedPlugins = { version: 2, plugins: {} }
-  }
-
-  if (!installedPlugins.plugins["boons@local"]) {
-    installedPlugins.plugins["boons@local"] = []
-  }
-
-  const entry = {
-    scope: "user",
-    installPath: pluginDir,
-    version: "1.0.0",
-  }
-
-  const existingIndex = (installedPlugins.plugins["boons@local"] as any[]).findIndex(
-    (p) => p.installPath === pluginDir,
-  )
-  if (existingIndex >= 0) {
-    installedPlugins.plugins["boons@local"][existingIndex] = entry
-  } else {
-    installedPlugins.plugins["boons@local"].push(entry)
-  }
-
-  const pluginsDir = path.dirname(installedPluginsPath)
-  fs.mkdirSync(pluginsDir, { recursive: true })
-  await Bun.write(installedPluginsPath, JSON.stringify(installedPlugins, null, 2) + "\n")
-
-  // Enable in settings.json
-  const settingsPath = path.join(os.homedir(), ".claude", "settings.json")
-  let settings: Record<string, unknown>
-  try {
-    const raw = fs.readFileSync(settingsPath, "utf-8")
-    settings = JSON.parse(raw)
-  } catch {
-    settings = {}
-  }
-
-  if (!settings.enabledPlugins) {
-    settings.enabledPlugins = {}
-  }
-  ;(settings.enabledPlugins as Record<string, boolean>)["boons@local"] = true
-
-  await Bun.write(settingsPath, JSON.stringify(settings, null, 2) + "\n")
-
-  console.log(`Installed boons plugin to ${pluginDir}`)
+  console.log(`Installed boons skills to ${userSkillsDir}`)
   ensureBoonsOnPath()
 }
 

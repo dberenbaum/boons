@@ -21,8 +21,10 @@ export interface MessageEntry {
 }
 
 export function getDefaultDBPath(): string {
-  return process.env.BOONS_DB_PATH
-    ?? path.join(os.homedir(), ".local/share/opencode/opencode.db")
+  if (process.env.BOONS_DB_PATH) return process.env.BOONS_DB_PATH
+  const dataHome = process.env.XDG_DATA_HOME
+    ?? path.join(os.homedir(), ".local/share")
+  return path.join(dataHome, "opencode", "opencode.db")
 }
 
 export function readSessionFromDB(dbPath: string, sessionID: string): SessionInfo {

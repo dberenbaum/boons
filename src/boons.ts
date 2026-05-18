@@ -126,7 +126,7 @@ Options:
   --json              Output as JSON (for tool integration)
 
 Environment:
-  BOONS_DB_PATH       OpenCode database path (default: ~/.local/share/opencode/opencode.db)
+  BOONS_DB_PATH       OpenCode database path (default: $XDG_DATA_HOME/opencode/opencode.db or ~/.local/share/opencode/opencode.db)
   BOONS_CLAUDE_DIR    Claude Code projects directory (default: ~/.claude/projects)
   BOONS_CURSOR_DIR    Cursor projects directory (default: ~/.cursor/projects)
 `

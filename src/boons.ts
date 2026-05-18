@@ -1023,6 +1023,56 @@ Only use in projects with a \`.boons/\` directory.
     await Bun.write(path.join(skillsDir, skill.name, "SKILL.md"), skill.content)
   }
 
+  // Register in installed_plugins.json
+  const installedPluginsPath = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json")
+  let installedPlugins: { version: number; plugins: Record<string, unknown[]> }
+  try {
+    const raw = fs.readFileSync(installedPluginsPath, "utf-8")
+    installedPlugins = JSON.parse(raw)
+  } catch {
+    installedPlugins = { version: 2, plugins: {} }
+  }
+
+  if (!installedPlugins.plugins["boons@local"]) {
+    installedPlugins.plugins["boons@local"] = []
+  }
+
+  const entry = {
+    scope: "user",
+    installPath: pluginDir,
+    version: "1.0.0",
+  }
+
+  const existingIndex = (installedPlugins.plugins["boons@local"] as any[]).findIndex(
+    (p) => p.installPath === pluginDir,
+  )
+  if (existingIndex >= 0) {
+    installedPlugins.plugins["boons@local"][existingIndex] = entry
+  } else {
+    installedPlugins.plugins["boons@local"].push(entry)
+  }
+
+  const pluginsDir = path.dirname(installedPluginsPath)
+  fs.mkdirSync(pluginsDir, { recursive: true })
+  await Bun.write(installedPluginsPath, JSON.stringify(installedPlugins, null, 2) + "\n")
+
+  // Enable in settings.json
+  const settingsPath = path.join(os.homedir(), ".claude", "settings.json")
+  let settings: Record<string, unknown>
+  try {
+    const raw = fs.readFileSync(settingsPath, "utf-8")
+    settings = JSON.parse(raw)
+  } catch {
+    settings = {}
+  }
+
+  if (!settings.enabledPlugins) {
+    settings.enabledPlugins = {}
+  }
+  ;(settings.enabledPlugins as Record<string, boolean>)["boons@local"] = true
+
+  await Bun.write(settingsPath, JSON.stringify(settings, null, 2) + "\n")
+
   console.log(`Installed boons plugin to ${pluginDir}`)
   ensureBoonsOnPath()
 }

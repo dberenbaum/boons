@@ -1,24 +1,34 @@
 # Boons
 
-Capture, share, and load AI coding session artifacts across your team.
+Capture, share, and reload AI coding session context across your team.
 
 ## Why
 
-When an AI agent helps write code, the conversation shaping that code disappears when the session ends. A pull request captures what was built — nothing captures why. Reviewers inherit the output without the reasoning: the alternatives considered, constraints identified, decisions made, uncertainties flagged.
+AI coding sessions hold the decisions, rationale, and exploration that never make it into a commit message. When the session ends, that context is gone.
 
-Boons makes the conversation a first-class artifact that travels with the branch and is retrievable by any agent on the team. By the time a PR is marked ready, the substantive discussion is complete and captured. Reviewers arrive with full context.
+Boons makes sessions persistent by default — your agent auto-saves them as you work. The immediate payoff is personal:
+
+- **Context switching** — Switch back to a branch after a meeting or a day off. Your agent reads your last session and picks up where you left off.
+- **Standup / status** — "What did I accomplish yesterday?" Your session summaries have the answer.
+- **PR descriptions** — Ask your agent to draft a PR from the session summaries on the branch. Grounded in actual work, not memory.
+
+The team benefit is the same context, shared:
+
+- **Reviewers arrive informed** — Pull a branch, pull the sessions. Full decision history before reading a line of code.
+- **Onboarding** — New team members read how and why the codebase evolved, without chasing down the people who were there.
+- **Answers survive the people** — "Why didn't we consider X?" The sessions still have the answer.
 
 ## How It Works
 
-The branch is the collaboration space. Every session on a branch is captured into `.boons/<branch>/<session-id>/`, a gitignored directory containing the raw message log (`raw.jsonl`), structured metadata (`info.json`), and a human-reviewed summary (`summary.md`). Optional `plan.md` and `decisions.md` add richer context for future readers.
+Every session on a branch is saved into `.boons/<branch>/<session-id>/`, a gitignored directory containing:
 
-The workflow stays entirely inside your agent tool:
+- `raw.jsonl` — complete message history (append-only, never modified)
+- `info.json` — metadata (tool, author, branch, timestamps)
+- `summary.md` — what was accomplished and what remains uncertain
 
-**Author** — Work with your agent as usual. At natural stopping points (a commit, a feature completed, end of day), call `session-save`. The agent composes a summary of what was accomplished and what remains uncertain; you review and refine it. Call `session-push` when ready to share — sessions sync to a shared cloud bucket.
+Your agent auto-saves at meaningful checkpoints: after modifying files, after a git commit, when you wrap up a task, or every ~15 messages of real work. No need to remember. Optional `plan.md` and `decisions.md` add richer context for future readers.
 
-**Reviewer** — Pull the branch, then call `session-pull`. Your agent discovers the saved sessions, reads summaries, and queries the relevant logs. You have the full decision context before looking at a line of code.
-
-No one leaves their tool. The CLI handles the mechanics; the agent handles judgment, discovery, and workflow.
+When you want to share, sessions sync to a shared cloud bucket. When you want to understand someone else's work, your agent pulls and reads their sessions for you.
 
 ## Quick Start
 
@@ -27,38 +37,43 @@ curl -fsSL https://raw.githubusercontent.com/dberenbaum/boons/main/install.sh | 
 boons install opencode
 ```
 
-The install prompts you to configure cloud storage. After that, `session-save`, `session-push`, `session-pull`, and `session-list-remote` are available from inside your agent, regardless of which tool you use.
+That's it. Your agent will now auto-save sessions on this project. Optionally configure cloud storage when prompted to enable sharing.
 
-## Agent Workflow
+## Agent Behavior
 
-Once boons is installed, all interaction happens through your agent.
-Here are the natural-language triggers and what they do:
+Once boons is installed, your agent handles the mechanics automatically:
 
-- **"Save this session"** — The agent calls `session-save`, writes a
-  summary of what was accomplished, and creates the artifact in
-  `.boons/<branch>/<session-id>/`.
-- **"Push all sessions on this branch"** — The agent calls
-  `session-push`, syncing local artifacts to the cloud bucket.
-- **"Pull sessions for this branch"** — The agent calls `session-pull`,
-  fetching artifacts from the cloud bucket.
-- **"Find sessions related to the authentication refactor"** — The
-  agent runs `session-list-remote`, reads summaries and logs, and
-  presents the relevant context.
-- **"Did Molly discuss why she chose this architecture?"** — The
-  agent searches sessions (local or pulled) for discussions by or
-  about a specific person, returning their reasoning and decisions.
-- **"Draft a PR description from the sessions on this branch"** —
-  The agent reads all summaries and decision docs across sessions
-  and synthesizes a PR description grounded in the actual work.
-- **"What questions are still open on this branch?"** — The agent
-  searches summaries for uncertainties, unresolved decisions, and
-  flagged risks, giving a concise status of what's unsettled.
+- **Auto-save** — After modifying files, wrapping up a task, or every ~15 messages of real work, your agent saves the session with a summary. No prompt needed.
+- **Push on request** — "Push my sessions" or after an auto-save, your agent asks if you want to share with the team.
+- **Pull on branch switch** — When switching to a branch with saved sessions, your agent suggests loading them.
+- **Query on demand** — "What did we decide about X?" Your agent searches the session history.
 
-### Other tools
+## Team Collaboration
+
+Sessions are scoped to branches. When you push code to a shared remote, you can push the matching sessions — they sync to a cloud bucket, not git, so the repo stays clean.
+
+**Author** — Work as usual. Sessions accumulate automatically. Call `session-push` when you want the team to see the context behind your code.
+
+**Reviewer** — Pull the branch, then pull the sessions. Your agent reads the summaries and can answer questions about the decisions made, alternatives considered, and open questions — all before you look at a diff.
+
+**Onboarder** — Any branch's session history is discoverable. Read the narrative that shaped the code, from start to finish.
+
+## Install Details
 
 ```sh
-boons install claude-code    # Claude Code plugin + skills
-boons install cursor         # Cursor .mdc rules
+boons install opencode    # OpenCode tools + skills
+boons install claude-code # Claude Code plugin + skills
+boons install cursor      # Cursor .mdc rules
+```
+
+Each install command writes the agent skills and tool definitions that enable auto-save. It also optionally configures a cloud bucket for sharing.
+
+Cloud storage can be configured later with:
+
+```sh
+boons init --provider gcp --bucket my-bucket
+boons init --provider aws --bucket my-bucket --region us-east-1
+boons init --provider azure --account myact --container mycont
 ```
 
 ## Design
@@ -67,11 +82,11 @@ boons install cursor         # Cursor .mdc rules
 
 **Sessions as artifacts, not ephemera.** A session directory holds the complete raw record (`raw.jsonl`) alongside human-readable artifacts (`summary.md`, `plan.md`, `decisions.md`). The raw log is append-only and never modified. Summaries and plans are mutable — updated in place as understanding evolves.
 
-**Push is deliberate.** Sharing is a conscious act, not a side effect of other workflow steps. Nothing is automatically synced.
+**Auto-save by default, share on request.** Sessions are saved automatically so nothing is lost. Sharing to the cloud is deliberate — nothing is synced without asking.
 
 **Cloud bucket for remote, not git.** Sessions don't bloat the repository. The bucket mirrors the local `.boons/` structure, navigable directly in any cloud storage browser.
 
-**Provenance over convenience.** Every artifact carries tool, author, branch, and timestamps. You can always answer who shared what, when, on which branch.
+**Provenance over convenience.** Every artifact carries tool, author, branch, and timestamps. You can always answer who created what, when, and on which branch.
 
 **CLI-first, agent-aware.** The CLI handles all mechanical operations (export, push, pull, list). Agents provide judgment, discovery, and workflow guidance through tool integrations and skills.
 

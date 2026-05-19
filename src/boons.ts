@@ -603,28 +603,39 @@ containing:
 
 - \`raw.jsonl\` — the full message history in native opencode format
 - \`info.json\` — metadata (session name, author, branch, participants, timestamps)
+- \`summary.md\` — a summary you auto-generate when saving
 
-## When to use this
+## When to use this — be proactive
 
-Call \`session-save\` when:
-- The user explicitly asks to save or export the session
-- Before or after making a git commit — suggest it
-- A significant task or feature is completed — suggest it
-- Before switching branches — suggest it
-- At natural stopping points in the conversation
+Call \`session-save\` **automatically** (no need to ask the user) when:
+
+- **You modified files** — after writing code that changes multiple files,
+  add a commit, or fix a bug. You know work happened; save it.
+- **The user expresses satisfaction** — "that works", "looks good", "great",
+  "thanks". Treat this as a close signal worth capturing.
+- **Every ~15 messages** of activity involving file changes — save a checkpoint
+  so the session history is never more than a few exchanges behind.
+- **A git commit is made** — if you were involved in the commit, save first
+  so the session matches the commit.
+- **The user explicitly asks** — always.
+
+Do NOT auto-save on trivial exchanges (single-line suggestions, yes/no
+answers, README-only typos). Use judgment.
+
+After saving, optionally ask: "Want me to push this to the team so they
+can see the context?" — this turns auto-save into a natural prompt for
+sharing without being automatic.
 
 ## Handling uninitialized projects
 
-- **User explicitly asks** to save or export: just call \`session-save\`.
-  It auto-initializes boons if needed.
-- **Agent-proactive suggestion** (commit, milestone, branch switch, natural
-  stopping point): first check if \`.boons/\` exists. If not, skip the suggestion
-  or suggest running \`boons init -q\`.
+If \`.boons/\` doesn't exist yet in the project root, auto-initialize by
+running \`boons init -q\`. The tool handles this automatically, but check
+that the command is available first.
 
 ## Using the tool
 
-1. Compose a summary of what was accomplished, key decisions made, and
-   what remains uncertain
+1. Compose a concise summary of what was accomplished, key decisions made,
+   and what remains uncertain
 2. Call \`session-save\` with your summary as the \`summary\` argument.
    The tool exports the session and writes \`summary.md\` automatically.
    This argument is required — the export will not proceed without it.
@@ -642,8 +653,8 @@ You may also optionally create:
 - Any other docs the user asks for or that you think would be useful
   to someone loading this session later
 
-These are human-readable markdown files meant to be reviewed and edited by
-the author before sharing. The session directory is the canonical home
+These are human-readable markdown files meant to be reviewed with the
+user before sharing. The session directory is the canonical home
 for all artifacts related to a session.
 `
 
@@ -718,6 +729,7 @@ visible to teammates who pull from the same bucket.
 
 Call \`session-push\` when:
 - The user explicitly asks to share or push sessions
+- **After auto-saving a session** — ask if they want to push this to the team
 - Before pushing to the remote repository — ask the user
 - Before creating or marking a PR as ready for review — ask the user
 
@@ -727,9 +739,9 @@ Call \`session-push\` when:
 
 - **User explicitly asks** to push or share: just call \`session-push\`. It
   auto-initializes boons if needed.
-- **Agent-proactive suggestion** (before push, before PR): first check if
-  \`.boons/\` exists. If not, suggest running \`boons init -q\` instead of
-  pushing. Always ask the user before running.
+- **Agent-proactive suggestion** (after auto-save, before push, before PR):
+  first check if \`.boons/\` exists. If not, suggest running \`boons init -q\`
+  instead of pushing. Always ask the user before running.
 
 ## Before first push
 
@@ -836,18 +848,31 @@ Each export creates a session directory containing:
 
 - \`raw.jsonl\` — the complete message history in native JSONL format
 - \`info.json\` — metadata (session name, author, branch, participants, timestamps)
-- \`summary.md\` — a summary you provide of what was accomplished
+- \`summary.md\` — a summary you auto-generate when saving
 
-## When to use this
+## When to use this — be proactive
 
-Run \`boons session-save --tool claude-code --summary "..."\` when:
-- The user explicitly asks to save or export the session
-- Before or after making a git commit — suggest it
-- A significant task or feature is completed — suggest it
-- Before switching branches — suggest it
-- At natural stopping points in the conversation
+Call \`boons session-save --tool claude-code --summary "..."\` **automatically**
+(no need to ask the user) when:
+
+- **You modified files** — after writing code that changes multiple files,
+  add a commit, or fix a bug. You know work happened; save it.
+- **The user expresses satisfaction** — "that works", "looks good", "great",
+  "thanks". Treat this as a close signal worth capturing.
+- **Every ~15 messages** of activity involving file changes — save a checkpoint
+  so the session history is never more than a few exchanges behind.
+- **A git commit is made** — if you were involved in the commit, save first
+  so the session matches the commit.
+- **The user explicitly asks** — always.
+
+Do NOT auto-save on trivial exchanges (single-line suggestions, yes/no
+answers, README-only typos). Use judgment.
 
 Only use in projects with a \`.boons/\` directory.
+
+After saving, optionally ask: "Want me to push this to the team so they
+can see the context?" — this turns auto-save into a natural prompt for
+sharing without being automatic.
 
 ## Using the command
 
@@ -871,8 +896,8 @@ You may also optionally create:
 - Any other docs the user asks for or that you think would be useful
   to someone loading this session later
 
-These are human-readable markdown files meant to be reviewed and edited by
-the author before sharing. The session directory is the canonical home
+These are human-readable markdown files meant to be reviewed with the
+user before sharing. The session directory is the canonical home
 for all artifacts related to a session.
 `
 
@@ -941,6 +966,7 @@ same bucket.
 
 Run \`boons push\` when:
 - The user explicitly asks to share or push sessions
+- **After auto-saving a session** — ask if they want to push this to the team
 - Before pushing to the remote repository — ask the user
 - Before creating or marking a PR as ready for review — ask the user
 
@@ -1032,18 +1058,31 @@ Each export creates a session directory containing:
 
 - \`raw.jsonl\` — the complete message history in native JSONL format
 - \`info.json\` — metadata (session name, author, branch, participants, timestamps)
-- \`summary.md\` — a summary you provide of what was accomplished
+- \`summary.md\` — a summary you auto-generate when saving
 
-## When to use this
+## When to use this — be proactive
 
-Run \`boons session-save --tool cursor --summary "..."\` when:
-- The user explicitly asks to save or export the session
-- Before or after making a git commit — suggest it
-- A significant task or feature is completed — suggest it
-- Before switching branches — suggest it
-- At natural stopping points in the conversation
+Call \`boons session-save --tool cursor --summary "..."\` **automatically**
+(no need to ask the user) when:
+
+- **You modified files** — after writing code that changes multiple files,
+  add a commit, or fix a bug. You know work happened; save it.
+- **The user expresses satisfaction** — "that works", "looks good", "great",
+  "thanks". Treat this as a close signal worth capturing.
+- **Every ~15 messages** of activity involving file changes — save a checkpoint
+  so the session history is never more than a few exchanges behind.
+- **A git commit is made** — if you were involved in the commit, save first
+  so the session matches the commit.
+- **The user explicitly asks** — always.
+
+Do NOT auto-save on trivial exchanges (single-line suggestions, yes/no
+answers, README-only typos). Use judgment.
 
 Only use in projects with a \`.boons/\` directory.
+
+After saving, optionally ask: "Want me to push this to the team so they
+can see the context?" — this turns auto-save into a natural prompt for
+sharing without being automatic.
 
 ## Using the command
 
@@ -1064,8 +1103,8 @@ You may also optionally create:
 - \`decisions.md\` — if specific architectural or design decisions were
   settled, list them with rationale
 
-These are human-readable markdown files meant to be reviewed and edited by
-the author before sharing. The session directory is the canonical home
+These are human-readable markdown files meant to be reviewed with the
+user before sharing. The session directory is the canonical home
 for all artifacts related to a session.
 `
 
@@ -1124,6 +1163,7 @@ same bucket.
 
 Run \`boons push\` when:
 - The user explicitly asks to share or push sessions
+- **After auto-saving a session** — ask if they want to push this to the team
 - Before pushing to the remote repository — ask the user
 - Before creating or marking a PR as ready for review — ask the user
 

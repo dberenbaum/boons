@@ -685,33 +685,68 @@ Sessions may also have additional files generated after export:
 
 To see which files are present for a particular session, list its directory.
 
-## When to use this
-
-Use the \`session-list\` tool when:
-- The user explicitly asks about prior decisions or context
-- After switching to a new branch — suggest loading saved sessions for that branch
-- When reviewing someone else's work on a branch — suggest loading their sessions
-
 ## Handling uninitialized projects
 
-- **User explicitly asks** about prior context or sessions: just call the
-  \`session-list\` tool. It auto-initializes boons if needed.
-- **Agent-proactive suggestion** (branch switch, review): first check if
-  \`.boons/\` exists. If not, suggest running \`boons init -q\` instead of
-  loading sessions.
+If \`.boons/\` doesn't exist in the project, the \`session-list\` tool
+auto-initializes it. But if you're suggesting a load proactively (not
+in response to a user request), check that \`.boons/\` exists first
+and skip the suggestion if it doesn't.
 
-## Discovery workflow
+## Protocols
 
-1. Call the \`session-list\` tool (optionally with \`branch\`) to see what
-   sessions exist. It returns JSON with session names, message counts,
-   and which extra files (summary, plan, decisions, etc.) are available.
-2. For sessions that look relevant, read \`summary.md\` first for
-   a concise overview and key decisions.
-3. If more detail is needed, read \`raw.jsonl\` — each line is a JSON
-   object with \`{info, parts}\` reflecting the chat message.
-   Search it with grep or process it line by line.
-4. Check for any other docs present in the session directory
-   (\`plan.md\`, \`decisions.md\`, etc.).
+### On branch checkout or creation
+
+When the user switches to or creates a branch, proactively check for
+existing context:
+
+1. Call \`session-list\` (optionally with the branch name) to discover
+   saved sessions
+2. If sessions exist, read the most recent \`summary.md\`
+3. Also read \`plan.md\` and \`decisions.md\` if present
+4. Orient the user: "The last session was working on X. Key decisions
+   so far: Y. Still open or uncertain: Z."
+
+This gives the user a running start — they don't have to re-explain
+where things stand.
+
+### Starting a new session or feature
+
+When the user begins describing a new task or feature to work on:
+
+1. Check \`session-list\` for context on the current branch
+2. Read the latest \`summary.md\` (and \`plan.md\`/\`decisions.md\`
+   if present)
+3. Use that context to ground your response — don't act like a blank
+   slate. Reference prior decisions and open questions so the work
+   feels continuous.
+
+### Drafting a PR description
+
+When asked to draft or help write a PR description:
+
+1. Call \`session-list\` for the branch to discover all sessions
+2. Read \`summary.md\` and \`decisions.md\` from every session
+3. Cross-reference decisions across sessions to identify what was
+   settled and what changed direction midstream
+4. Collect all open questions and uncertainties from summaries
+5. Draft a PR with sections: what changed, why, key decisions made,
+   alternatives considered, open questions
+
+### Reviewing or understanding a branch
+
+When asked to review a branch or understand someone else's work:
+
+1. Call \`session-list\` for the branch
+2. Read all summaries to get the narrative arc of the branch — how
+   the code evolved across sessions, not just the final state
+3. For sessions that mention specific design decisions, read
+   \`decisions.md\`
+4. Generate a synthesis: overall purpose, what was built, design
+   decisions with rationale, open questions
+
+If \`summary.md\` files are sparse and \`raw.jsonl\` exists, you may
+read the raw logs directly to fill in gaps — but prefer summaries
+as the starting point.
 `
 
   const pushSkillContent = `---
@@ -928,27 +963,62 @@ Sessions may also have additional files generated after export:
 
 To see which files are present for a particular session, list its directory.
 
-## When to use this
-
-Use \`boons ls\` when:
-- The user explicitly asks about prior decisions or context
-- After switching to a new branch — suggest loading saved sessions for that branch
-- When reviewing someone else's work on a branch — suggest loading their sessions
-
 Only use in projects with a \`.boons/\` directory.
 
-## Discovery workflow
+## Protocols
 
-1. Run \`boons ls [--branch <name>]\` to see what sessions exist.
-   This shows session names, message counts, and which extra files
-   (summary, plan, decisions, etc.) are available.
-2. For sessions that look relevant, read \`summary.md\` first for
-   a concise overview and key decisions.
-3. If more detail is needed, read \`raw.jsonl\` — each line is a JSON
-   object reflecting a message in the session. Search it with grep
-   or process it line by line.
-4. Check for any other docs present in the session directory
-   (\`plan.md\`, \`decisions.md\`, etc.).
+### On branch checkout or creation
+
+When the user switches to or creates a branch, proactively check for
+existing context:
+
+1. Run \`boons ls [--branch <name>]\` to discover saved sessions
+2. If sessions exist, read the most recent \`summary.md\`
+3. Also read \`plan.md\` and \`decisions.md\` if present
+4. Orient the user: "The last session was working on X. Key decisions
+   so far: Y. Still open or uncertain: Z."
+
+This gives the user a running start — they don't have to re-explain
+where things stand.
+
+### Starting a new session or feature
+
+When the user begins describing a new task or feature to work on:
+
+1. Check for context with \`boons ls\` on the current branch
+2. Read the latest \`summary.md\` (and \`plan.md\`/\`decisions.md\`
+   if present)
+3. Use that context to ground your response — don't act like a blank
+   slate. Reference prior decisions and open questions so the work
+   feels continuous.
+
+### Drafting a PR description
+
+When asked to draft or help write a PR description:
+
+1. Run \`boons ls [--branch <name>]\` to discover all sessions
+2. Read \`summary.md\` and \`decisions.md\` from every session
+3. Cross-reference decisions across sessions to identify what was
+   settled and what changed direction midstream
+4. Collect all open questions and uncertainties from summaries
+5. Draft a PR with sections: what changed, why, key decisions made,
+   alternatives considered, open questions
+
+### Reviewing or understanding a branch
+
+When asked to review a branch or understand someone else's work:
+
+1. Run \`boons ls [--branch <name>]\` for the branch
+2. Read all summaries to get the narrative arc of the branch — how
+   the code evolved across sessions, not just the final state
+3. For sessions that mention specific design decisions, read
+   \`decisions.md\`
+4. Generate a synthesis: overall purpose, what was built, design
+   decisions with rationale, open questions
+
+If \`summary.md\` files are sparse and \`raw.jsonl\` exists, you may
+read the raw logs directly to fill in gaps — but prefer summaries
+as the starting point.
 `
 
   const pushSkillContent = `---
@@ -1131,21 +1201,51 @@ Sessions may also have:
 - \`plan.md\` — current intent, design approach, and next steps
 - \`decisions.md\` — architectural or design decisions with rationale
 
-## When to use this
-
-Use \`boons ls\` when:
-- The user explicitly asks about prior decisions or context
-- After switching to a new branch — suggest loading saved sessions for that branch
-- When reviewing someone else's work on a branch — suggest loading their sessions
-
 Only use in projects with a \`.boons/\` directory.
 
-## Discovery workflow
+## Protocols
 
-1. Run \`boons ls [--branch <name>]\` to see what sessions exist.
-2. For sessions that look relevant, read \`summary.md\` first.
-3. If more detail is needed, read \`raw.jsonl\` line by line.
-4. Check for any other docs present (\`plan.md\`, \`decisions.md\`, etc.).
+### On branch checkout or creation
+
+When the user switches to or creates a branch, proactively check for
+existing context:
+
+1. Run \`boons ls [--branch <name>]\` to discover saved sessions
+2. If sessions exist, read the most recent \`summary.md\`
+3. Also read \`plan.md\` and \`decisions.md\` if present
+4. Orient the user: "The last session was working on X. Key decisions
+   so far: Y. Still open or uncertain: Z."
+
+### Starting a new session or feature
+
+When the user begins describing a new task or feature to work on:
+
+1. Check for context with \`boons ls\` on the current branch
+2. Read the latest \`summary.md\` (and \`plan.md\`/\`decisions.md\`
+   if present)
+3. Use that context to ground your response — don't act like a blank
+   slate. Reference prior decisions and open questions.
+
+### Drafting a PR description
+
+When asked to draft or help write a PR description:
+
+1. Run \`boons ls [--branch <name>]\` to discover all sessions
+2. Read \`summary.md\` and \`decisions.md\` from every session
+3. Cross-reference decisions across sessions
+4. Collect all open questions from summaries
+5. Draft a PR with sections: what changed, why, key decisions,
+   alternatives considered, open questions
+
+### Reviewing or understanding a branch
+
+When asked to review a branch or understand someone else's work:
+
+1. Run \`boons ls [--branch <name>]\` for the branch
+2. Read all summaries to get the narrative arc
+3. For sessions with design decisions, read \`decisions.md\`
+4. Generate a synthesis: purpose, what was built, design decisions,
+   open questions
 `
 
   const pushRuleContent = `---

@@ -617,6 +617,8 @@ Call \`session-save\` **automatically** (no need to ask the user) when:
   so the session history is never more than a few exchanges behind.
 - **A git commit is made** — if you were involved in the commit, save first
   so the session matches the commit.
+- **Before creating a branch** — save before running \`git checkout -b\` or
+  \`git branch\` to capture the exploration that led to it.
 - **The user explicitly asks** — always.
 
 Do NOT auto-save on trivial exchanges (single-line suggestions, yes/no
@@ -898,6 +900,8 @@ Call \`boons session-save --tool claude-code --summary "..."\` **automatically**
   so the session history is never more than a few exchanges behind.
 - **A git commit is made** — if you were involved in the commit, save first
   so the session matches the commit.
+- **Before creating a branch** — save before running \`git checkout -b\` or
+  \`git branch\` to capture the exploration that led to it.
 - **The user explicitly asks** — always.
 
 Do NOT auto-save on trivial exchanges (single-line suggestions, yes/no
@@ -1143,6 +1147,8 @@ Call \`boons session-save --tool cursor --summary "..."\` **automatically**
   so the session history is never more than a few exchanges behind.
 - **A git commit is made** — if you were involved in the commit, save first
   so the session matches the commit.
+- **Before creating a branch** — save before running \`git checkout -b\` or
+  \`git branch\` to capture the exploration that led to it.
 - **The user explicitly asks** — always.
 
 Do NOT auto-save on trivial exchanges (single-line suggestions, yes/no

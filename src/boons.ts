@@ -404,15 +404,17 @@ async function cmdInstall(tool: string, args: Record<string, string>) {
     process.exit(1)
   }
 
+  const projectDir = args["--project"] === "true" ? process.cwd() : undefined
+
   if (tool === "opencode") {
-    await installOpenCode()
+    await installOpenCode(projectDir)
   } else if (tool === "claude-code") {
-    await installClaudeCode()
+    await installClaudeCode(projectDir)
   } else if (tool === "cursor") {
-    await installCursor()
+    await installCursor(projectDir)
   }
 
-  if (args["--project"] === "true") {
+  if (projectDir) {
     addBoonsToGitignore("project")
   } else {
     addBoonsToGitignore("global")
@@ -440,423 +442,89 @@ function ensureBoonsOnPath() {
 
   const pathDirs = (process.env.PATH || "").split(":")
   if (!pathDirs.includes(localBin)) {
-    console.log(`\nNote: Add ${localBin} to your PATH for boons to work in tools:`)
-    console.log(`  export PATH="${localBin}:$PATH"`)
+    addLocalBinToPath(localBin)
   }
 }
 
-async function installOpenCode() {
-  const configDir = path.join(os.homedir(), ".config", "opencode")
-  const toolsDir = path.join(configDir, "tools")
-  const skillsDir = path.join(configDir, "skills")
+function addLocalBinToPath(localBin: string) {
+  const exportLine = `export PATH="${localBin}:$PATH"`
 
-  const exportToolContent = `import { tool } from "@opencode-ai/plugin"
-import * as fs from "fs"
-import * as path from "path"
+  const candidates = [
+    path.join(os.homedir(), ".profile"),
+    path.join(os.homedir(), ".bashrc"),
+    path.join(os.homedir(), ".zshrc"),
+  ]
 
-export default tool({
-  description: "Save the current opencode session to a boons artifact directory (.boons/). You MUST provide a summary of what was accomplished.",
-  args: {
-    summary: tool.schema.string().describe("A concise summary of what the session accomplished, key decisions made, and what remains uncertain"),
+  for (const file of candidates) {
+    if (!fs.existsSync(file)) continue
+    const content = fs.readFileSync(file, "utf-8")
+    if (content.includes(exportLine)) return
+    const updated = content.endsWith("\n") ? `${content}${exportLine}\n` : `${content}\n${exportLine}\n`
+    fs.writeFileSync(file, updated)
+    console.log(`Added ${localBin} to PATH in ${file}`)
+    return
+  }
+
+  console.log(`Add ${localBin} to your PATH:\n  ${exportLine}`)
+}
+
+interface ToolInfo {
+  flag: string
+  label: string
+  name: string
+  globalDir: string
+  projectDir: string
+  hasInit: boolean
+  extraSave: string
+}
+
+const tools: Record<string, ToolInfo> = {
+  opencode: {
+    flag: "opencode",
+    label: "OpenCode",
+    name: "session",
+    globalDir: path.join(os.homedir(), ".config", "opencode", "skills"),
+    projectDir: ".opencode/skills",
+    hasInit: true,
+    extraSave: "",
   },
-  async execute(args, context) {
-    if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
-      try {
-        await Bun.$\`boons install --project\`
-      } catch {
-        return "boons is not available. Install it from https://github.com/anomalyco/boons"
-      }
-    }
-    const result = await Bun.$\`boons session-save --tool opencode --session-id \${context.sessionID} --summary \${args.summary} --json\`.text()
-    return result.trim()
+  "claude-code": {
+    flag: "claude-code",
+    label: "Claude Code",
+    name: "boons-session",
+    globalDir: path.join(os.homedir(), ".claude", "skills"),
+    projectDir: ".claude/skills",
+    hasInit: false,
+    extraSave: "",
   },
-})
-`
-
-  const pushToolContent = `import { tool } from "@opencode-ai/plugin"
-import * as fs from "fs"
-import * as path from "path"
-
-export default tool({
-  description: "Push session artifacts for the current branch to the cloud bucket",
-  args: {
-    sessionId: tool.schema.string().optional(),
-    branch: tool.schema.string().optional(),
+  cursor: {
+    flag: "cursor",
+    label: "Cursor",
+    name: "boons-session",
+    globalDir: path.join(os.homedir(), ".cursor", "skills"),
+    projectDir: ".cursor/skills",
+    hasInit: false,
+    extraSave: `   Use \`--session-id\` to target a specific session, or omit to auto-detect
+   the most recent one. The session ID is the UUID shown in the ${"Cursor"} chat panel.
+   Pass \`--summary\` as a single quoted string on one line — do not use heredocs
+   or command substitution (\`\$(cat <<EOF...EOF)\`), which hang in non-interactive shells.`,
   },
-  async execute(args, context) {
-    if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
-      try {
-        await Bun.$\`boons install --project\`
-      } catch {
-        return "boons is not available. Install it from https://github.com/anomalyco/boons"
-      }
-    }
-    const result = await Bun.$\`boons push \${args.branch ? ["--branch", args.branch] : []} \${args.sessionId ? ["--session-id", args.sessionId] : []}\`.text()
-    return result.trim()
-  },
-})
-`
+}
 
-  const pullToolContent = `import { tool } from "@opencode-ai/plugin"
-import * as fs from "fs"
-import * as path from "path"
-
-export default tool({
-  description: "Pull session artifacts for the current branch from the cloud bucket",
-  args: {
-    sessionId: tool.schema.string().optional(),
-    branch: tool.schema.string().optional(),
-  },
-  async execute(args, context) {
-    if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
-      try {
-        await Bun.$\`boons install --project\`
-      } catch {
-        return "boons is not available. Install it from https://github.com/anomalyco/boons"
-      }
-    }
-    const result = await Bun.$\`boons pull \${args.branch ? ["--branch", args.branch] : []} \${args.sessionId ? ["--session-id", args.sessionId] : []}\`.text()
-    return result.trim()
-  },
-})
-`
-
-  const listRemoteToolContent = `import { tool } from "@opencode-ai/plugin"
-import * as fs from "fs"
-import * as path from "path"
-
-export default tool({
-  description: "List remote sessions available for the current branch",
-  args: {
-    branch: tool.schema.string().optional(),
-  },
-  async execute(args, context) {
-    if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
-      try {
-        await Bun.$\`boons install --project\`
-      } catch {
-        return "boons is not available. Install it from https://github.com/anomalyco/boons"
-      }
-    }
-    const result = await Bun.$\`boons ls --remote --json \${args.branch ? ["--branch", args.branch] : []}\`.text()
-    return result.trim()
-  },
-})
-`
-
-  const listToolContent = `import { tool } from "@opencode-ai/plugin"
-import * as fs from "fs"
-import * as path from "path"
-
-export default tool({
-  description: "List available local sessions for a branch from the .boons/ directory",
-  args: {
-    branch: tool.schema.string().optional(),
-  },
-  async execute(args, context) {
-    const boonsDir = path.join(context.worktree, ".boons")
-    if (!fs.existsSync(boonsDir)) {
-      try {
-        await Bun.$\`boons install --project\`
-      } catch {
-        return "boons is not available. Install it from https://github.com/anomalyco/boons"
-      }
-    }
-    const result = await Bun.$\`boons ls \${args.branch ? ["--branch", args.branch] : []} --json\`.text()
-    return result.trim()
-  },
-})
-`
-
-  const saveSkillContent = `---
-name: session-save
-description: Auto-save at natural stopping points: before commits, before branch switches, every ~15 messages, or when user is satisfied. Do NOT ask. Only relevant in projects with a .boons/ directory.
----
-
-## What this does
-
-Provides the \`session-save\` tool that saves the current chat session
-to the \`.boons/\` artifact directory. Each export creates a session directory
-containing:
-
-- \`raw.jsonl\` — the full message history in native opencode format
-- \`info.json\` — metadata (session name, author, branch, participants, timestamps)
-- \`summary.md\` — a summary you auto-generate when saving
-
-## When to use this — be proactive
-
-Call \`session-save\` **automatically** (no need to ask the user) when:
-
-- **You modified files** — after writing code that changes multiple files,
-  add a commit, or fix a bug. You know work happened; save it.
-- **The user expresses satisfaction** — "that works", "looks good", "great",
-  "thanks". Treat this as a close signal worth capturing.
-- **Every ~15 messages** of activity involving file changes — save a checkpoint
-  so the session history is never more than a few exchanges behind.
-- **A git commit is made** — if you were involved in the commit, save first
-  so the session matches the commit.
-- **Before creating a branch** — save before running \`git checkout -b\` or
-  \`git branch\` to capture the exploration that led to it.
-- **The user explicitly asks** — always.
-
-Do NOT auto-save on trivial exchanges (single-line suggestions, yes/no
-answers, README-only typos). Use judgment.
-
-After saving, optionally ask: "Want me to push this to the team so they
-can see the context?" — this turns auto-save into a natural prompt for
-sharing without being automatic.
-
-## Branch awareness
-
-Before saving, check the current branch with \`git rev-parse --abbrev-ref HEAD\`:
-
-- If on \`main\`, \`master\`, or \`HEAD\` (detached), flag it to the user.
-  Sessions on default branches can get mixed in with stable history.
-  Suggest creating a feature branch: \`git checkout -b <branch-name>\`.
-  Don't block — let the user decide (hotfixes, docs, etc. happen on main).
-- When starting a new task, suggest branching first if the user is on \`main\`.
-- When the user is about to switch branches, save the current session first
-  so context is captured on the right branch.
-
+function saveSkillContent(t: ToolInfo): string {
+  const initSection = t.hasInit ? `
 ## Handling uninitialized projects
 
 If \`.boons/\` doesn't exist yet in the project root, auto-initialize by
 running \`boons install --project\`. The tool handles this automatically, but check
 that the command is available first.
-
-## Using the tool
-
-1. Compose a concise summary of what was accomplished, key decisions made,
-   and what remains uncertain
-2. Call \`session-save\` with your summary as the \`summary\` argument.
-   The tool exports the session and writes \`summary.md\` automatically.
-   This argument is required — the export will not proceed without it.
-3. After the tool returns, read \`raw.jsonl\` and refine \`summary.md\` with
-   any important details you missed. Your initial summary is written from
-   memory; the session log gives you a second pass to catch specifics
-   about files changed, error messages, design rationale, and more.
-
-You may also optionally create:
-
-- \`plan.md\` — if the session included planning or design discussions,
-  document the current intent and next steps
-- \`decisions.md\` — if specific architectural or design decisions were
-  settled, list them with rationale
-- Any other docs the user asks for or that you think would be useful
-  to someone loading this session later
-
-These are human-readable markdown files meant to be reviewed with the
-user before sharing. The session directory is the canonical home
-for all artifacts related to a session.
+` : ""
+  const onlyUse = t.hasInit ? "" : `
+Only use in projects with a \`.boons/\` directory.
 `
-
-  const loadSkillContent = `---
-name: session-load
-description: Load prior context on branch switch, before new features, or when drafting PRs. Read .boons/ session summaries. Only relevant in projects with a .boons/ directory.
----
-
-## What this does
-
-Guides the agent in discovering and using saved session artifacts
-from the \`.boons/\` directory to understand prior work on a branch.
-
-## Available files per session
-
-Every saved session directory (\`.boons/<branch>/<session-id>/\`) contains:
-
-- \`info.json\` — metadata (name, author, participants, timestamps)
-- \`raw.jsonl\` — complete message history in native tool format
-
-Sessions may also have additional files generated after export:
-
-- \`summary.md\` — human-readable summary of what was accomplished,
-  key decisions made, and what remains uncertain
-- \`plan.md\` — current intent, design approach, and next steps
-- \`decisions.md\` — architectural or design decisions with rationale
-- Any other docs the author created
-
-To see which files are present for a particular session, list its directory.
-
-## Handling uninitialized projects
-
-If \`.boons/\` doesn't exist in the project, the \`session-list\` tool
-auto-initializes it. But if you're suggesting a load proactively (not
-in response to a user request), check that \`.boons/\` exists first
-and skip the suggestion if it doesn't.
-
-## Protocols
-
-### On branch checkout or creation
-
-When the user switches to or creates a branch, proactively check for
-existing context:
-
-1. Call \`session-list\` (optionally with the branch name) to discover
-   saved sessions
-2. If sessions exist, read the most recent \`summary.md\`
-3. Also read \`plan.md\` and \`decisions.md\` if present
-4. Orient the user: "The last session was working on X. Key decisions
-   so far: Y. Still open or uncertain: Z."
-5. If the new branch has no sessions, check for sessions on the branch
-   you came from or on \`main\`/\`master\`. Call \`session-list\` with those
-   branch names to discover relevant context.
-
-This gives the user a running start — they don't have to re-explain
-where things stand.
-
-### Starting a new session or feature
-
-When the user begins describing a new task or feature to work on:
-
-1. Check \`session-list\` for context on the current branch
-2. Read the latest \`summary.md\` (and \`plan.md\`/\`decisions.md\`
-   if present)
-3. Use that context to ground your response — don't act like a blank
-   slate. Reference prior decisions and open questions so the work
-   feels continuous.
-
-### Drafting a PR description
-
-When asked to draft or help write a PR description:
-
-1. Call \`session-list\` for the branch to discover all sessions
-2. Read \`summary.md\` and \`decisions.md\` from every session
-3. Cross-reference decisions across sessions to identify what was
-   settled and what changed direction midstream
-4. Collect all open questions and uncertainties from summaries
-5. Draft a PR with sections: what changed, why, key decisions made,
-   alternatives considered, open questions
-
-### Reviewing or understanding a branch
-
-When asked to review a branch or understand someone else's work:
-
-1. Call \`session-list\` for the branch
-2. Read all summaries to get the narrative arc of the branch — how
-   the code evolved across sessions, not just the final state
-3. For sessions that mention specific design decisions, read
-   \`decisions.md\`
-4. Generate a synthesis: overall purpose, what was built, design
-   decisions with rationale, open questions
-
-If \`summary.md\` files are sparse and \`raw.jsonl\` exists, you may
-read the raw logs directly to fill in gaps — but prefer summaries
-as the starting point.
-`
-
-  const pushSkillContent = `---
-name: session-push
-description: Ask to share after auto-save, before git push, or before PR review. Push .boons/ to cloud. Always ask user. Only relevant in projects with a .boons/ directory.
----
-
-## What this does
-
-Provides the \`session-push\` tool that uploads local session artifacts
-for the current branch to the configured cloud bucket. This makes sessions
-visible to teammates who pull from the same bucket.
-
-## When to use this
-
-Call \`session-push\` when:
-- The user explicitly asks to share or push sessions
-- **After auto-saving a session** — ask if they want to push this to the team
-- Before pushing to the remote repository — ask the user
-- Before creating or marking a PR as ready for review — ask the user
-
-**Always ask the user before running** — this shares session data with others.
-
-## Handling uninitialized projects
-
-- **User explicitly asks** to push or share: just call \`session-push\`. It
-  auto-initializes boons if needed.
-- **Agent-proactive suggestion** (after auto-save, before push, before PR):
-  first check if \`.boons/\` exists. If not, suggest running \`boons install --project\`
-  instead of pushing. Always ask the user before running.
-
-## Before first push
-
-Object versioning on your cloud bucket is **recommended** — it gives you
-the ability to recover from accidental overwrites since boons doesn't
-prevent overwriting sessions.
-
-## Default behavior
-
-\`session-push\` pushes all sessions for the current branch by default. Use
-the \`branch\` and \`sessionId\` arguments explicitly only when you need to
-push sessions from a different context.
-
-## Selective sharing
-
-If a session contains sensitive or irrelevant content, you may be asked to
-curate it before pushing. Remove private messages from the session's
-\`raw.jsonl\` and update \`info.json\` as needed. The push tool will upload
-whatever is in the local session directory.
-`
-
-  const pullSkillContent = `---
-name: session-pull
-description: Fetch remote context after git pull or before code review. Pull .boons/ from cloud. Only relevant in projects with a .boons/ directory.
----
-
-## What this does
-
-Provides the \`session-pull\` tool that downloads session artifacts for the
-current branch from the configured cloud bucket. This is how a collaborator
-or reviewer fetches context created by others.
-
-## When to use this
-
-Call \`session-pull\` when:
-- The user explicitly asks to fetch remote sessions
-- After pulling from the remote repository — suggest it
-- Before reviewing work on a branch — suggest fetching context from collaborators
-
-## Handling uninitialized projects
-
-- **User explicitly asks** to fetch remote sessions: just call \`session-pull\`.
-  It auto-initializes boons if needed.
-- **Agent-proactive suggestion** (after git pull, before review): first check
-  if \`.boons/\` exists. If not, skip the suggestion or suggest running
-  \`boons install --project\`.
-
-## Workflow
-
-1. First run \`session-list-remote\` (or \`boons ls --remote\`) to see what
-   sessions exist for the current branch
-2. Then run \`session-pull\` to fetch them into \`.boons/<branch>/\`
-3. After pulling, use \`session-load\` guidance to read them
-
-## Default behavior
-
-\`session-pull\` pulls all sessions for the current branch by default. Use the
-\`branch\` argument to pull sessions from a different branch context, or
-\`sessionId\` to pull a specific session.
-`
-
-  for (const dir of [toolsDir, path.join(skillsDir, "session-save"), path.join(skillsDir, "session-load"), path.join(skillsDir, "session-push"), path.join(skillsDir, "session-pull")]) {
-    fs.mkdirSync(dir, { recursive: true })
-  }
-  await Bun.write(path.join(toolsDir, "session-save.ts"), exportToolContent)
-  await Bun.write(path.join(toolsDir, "session-push.ts"), pushToolContent)
-  await Bun.write(path.join(toolsDir, "session-pull.ts"), pullToolContent)
-  await Bun.write(path.join(toolsDir, "session-list-remote.ts"), listRemoteToolContent)
-  await Bun.write(path.join(toolsDir, "session-list.ts"), listToolContent)
-  await Bun.write(path.join(skillsDir, "session-save", "SKILL.md"), saveSkillContent)
-  await Bun.write(path.join(skillsDir, "session-load", "SKILL.md"), loadSkillContent)
-  await Bun.write(path.join(skillsDir, "session-push", "SKILL.md"), pushSkillContent)
-  await Bun.write(path.join(skillsDir, "session-pull", "SKILL.md"), pullSkillContent)
-
-  console.log(`Installed boons tools to ${toolsDir}`)
-  console.log(`Installed boons skills to ${skillsDir}`)
-  ensureBoonsOnPath()
-}
-
-async function installClaudeCode() {
-  const userSkillsDir = path.join(os.homedir(), ".claude", "skills")
-
-  const saveSkillContent = `---
-name: boons-session-save
-description: Save the current Claude Code session to a .boons/ archive. Use this whenever completing a meaningful task, before or after git commits, before switching branches, or at natural stopping points. Only relevant in projects that have a .boons/ directory.
+  return `---
+name: ${t.name}-save
+description: Auto-save at natural stopping points: before commits, before branch switches, every ~15 messages, or when user is satisfied. Do NOT ask. Only relevant in projects with a .boons/ directory.
 ---
 
 ## What this does
@@ -864,13 +532,13 @@ description: Save the current Claude Code session to a .boons/ archive. Use this
 Export the current chat session to the \`.boons/\` artifact directory.
 Each export creates a session directory containing:
 
-- \`raw.jsonl\` — the complete message history in native JSONL format
+- \`raw.jsonl\` — the complete message history in native format
 - \`info.json\` — metadata (session name, author, branch, participants, timestamps)
 - \`summary.md\` — a summary you auto-generate when saving
 
 ## When to use this — be proactive
 
-Call \`boons session-save --tool claude-code --summary "..."\` **automatically**
+Run \`boons session-save --tool ${t.flag} --summary "..."\` **automatically**
 (no need to ask the user) when:
 
 - **You modified files** — after writing code that changes multiple files,
@@ -887,9 +555,7 @@ Call \`boons session-save --tool claude-code --summary "..."\` **automatically**
 
 Do NOT auto-save on trivial exchanges (single-line suggestions, yes/no
 answers, README-only typos). Use judgment.
-
-Only use in projects with a \`.boons/\` directory.
-
+${onlyUse}
 After saving, optionally ask: "Want me to push this to the team so they
 can see the context?" — this turns auto-save into a natural prompt for
 sharing without being automatic.
@@ -905,14 +571,13 @@ Before saving, check the current branch with \`git rev-parse --abbrev-ref HEAD\`
 - When starting a new task, suggest branching first if the user is on \`main\`.
 - When the user is about to switch branches, save the current session first
   so context is captured on the right branch.
-
+${initSection}
 ## Using the command
 
 1. Compose a concise summary of what was accomplished, key decisions made,
    and what remains uncertain
-2. Run \`boons session-save --tool claude-code --summary "<summary>" --session-id <id>\`
-   Use \`--session-id\` to target a specific session, or omit to auto-detect
-   the most recent one
+2. Run \`boons session-save --tool ${t.flag} --summary "<summary>" --session-id <id>\`
+   ${t.extraSave ? t.extraSave.trim() : "Use \`--session-id\` to target a specific session, or omit to auto-detect the most recent one"}
 3. After the command succeeds, read \`raw.jsonl\` in the created session
    directory and refine \`summary.md\` with any important details you missed.
    Your initial summary is written from memory; the session log gives you
@@ -932,10 +597,23 @@ These are human-readable markdown files meant to be reviewed with the
 user before sharing. The session directory is the canonical home
 for all artifacts related to a session.
 `
+}
 
-  const loadSkillContent = `---
-name: boons-session-load
-description: Load and review prior session artifacts from the .boons/ directory. Use when the user asks about prior decisions, after switching to a new branch, or when reviewing someone else's work. Only relevant in projects with a .boons/ directory.
+function loadSkillContent(t: ToolInfo): string {
+  const initSection = t.hasInit ? `
+## Handling uninitialized projects
+
+If \`.boons/\` doesn't exist in the project, it will be auto-initialized
+on first session-save. But if you're suggesting a load proactively (not
+in response to a user request), check that \`.boons/\` exists first
+and skip the suggestion if it doesn't.
+` : ""
+  const onlyUse = t.hasInit ? "" : `
+Only use in projects with a \`.boons/\` directory.
+`
+  return `---
+name: ${t.name}-load
+description: Load prior context on branch switch, before new features, or when drafting PRs. Read .boons/ session summaries. Only relevant in projects with a .boons/ directory.
 ---
 
 ## What this does
@@ -948,7 +626,7 @@ from the \`.boons/\` directory to understand prior work on a branch.
 Every saved session directory (\`.boons/<branch>/<session-id>/\`) contains:
 
 - \`info.json\` — metadata (name, author, participants, timestamps)
-- \`raw.jsonl\` — complete message history in native JSONL format
+- \`raw.jsonl\` — complete message history in native format
 
 Sessions may also have additional files generated after export:
 
@@ -959,9 +637,7 @@ Sessions may also have additional files generated after export:
 - Any other docs the author created
 
 To see which files are present for a particular session, list its directory.
-
-Only use in projects with a \`.boons/\` directory.
-
+${initSection}${onlyUse}
 ## Protocols
 
 ### On branch checkout or creation
@@ -1020,10 +696,22 @@ If \`summary.md\` files are sparse and \`raw.jsonl\` exists, you may
 read the raw logs directly to fill in gaps — but prefer summaries
 as the starting point.
 `
+}
 
-  const pushSkillContent = `---
-name: boons-session-push
-description: Push local .boons/ session artifacts to a shared cloud bucket, making them visible to collaborators. Always ask the user before pushing. Only relevant in projects with a .boons/ directory.
+function pushSkillContent(t: ToolInfo): string {
+  const initSection = t.hasInit ? `
+## Handling uninitialized projects
+
+- **User explicitly asks** to push or share: just run \`boons push\`. It
+  auto-initializes boons if needed.
+- **Agent-proactive suggestion** (after auto-save, before push, before PR):
+  first check if \`.boons/\` exists. If not, suggest running \`boons install --project\`
+  instead of pushing. Always ask the user before running.
+` : ""
+  const onlyUse = t.hasInit ? "" : `Only use in projects with a \`.boons/\` directory. `
+  return `---
+name: ${t.name}-push
+description: Ask to share after auto-save, before git push, or before PR review. Push .boons/ to cloud. Always ask user. Only relevant in projects with a .boons/ directory.
 ---
 
 ## What this does
@@ -1040,8 +728,8 @@ Run \`boons push\` when:
 - Before pushing to the remote repository — ask the user
 - Before creating or marking a PR as ready for review — ask the user
 
-Only use in projects with a \`.boons/\` directory. **Always ask the user before running** — this shares session data with others.
-
+${onlyUse}**Always ask the user before running** — this shares session data with others.
+${initSection}
 ## Before first push
 
 Object versioning on your cloud bucket is **recommended** — it gives you
@@ -1061,10 +749,24 @@ curate it before pushing. Remove private messages from the session's
 \`raw.jsonl\` and update \`info.json\` as needed. The push command will upload
 whatever is in the local session directory.
 `
+}
 
-  const pullSkillContent = `---
-name: boons-session-pull
-description: Pull session artifacts from a shared cloud bucket into the local .boons/ directory. Use after pulling from the remote repository, before reviewing work on a branch, or when the user asks to fetch remote sessions. Only relevant in projects with a .boons/ directory.
+function pullSkillContent(t: ToolInfo): string {
+  const initSection = t.hasInit ? `
+## Handling uninitialized projects
+
+- **User explicitly asks** to fetch remote sessions: just run \`boons pull\`.
+  It auto-initializes boons if needed.
+- **Agent-proactive suggestion** (after git pull, before review): first check
+  if \`.boons/\` exists. If not, skip the suggestion or suggest running
+  \`boons install --project\`.
+` : ""
+  const onlyUse = t.hasInit ? "" : `
+Only use in projects with a \`.boons/\` directory.
+`
+  return `---
+name: ${t.name}-pull
+description: Fetch remote context after git pull or before code review. Pull .boons/ from cloud. Only relevant in projects with a .boons/ directory.
 ---
 
 ## What this does
@@ -1079,259 +781,60 @@ Run \`boons pull\` when:
 - The user explicitly asks to fetch remote sessions
 - After pulling from the remote repository — suggest it
 - Before reviewing work on a branch — suggest fetching context from collaborators
-
-Only use in projects with a \`.boons/\` directory.
-
+${onlyUse}
 ## Workflow
 
 1. First run \`boons ls --remote\` to see what sessions exist for the
    current branch
 2. Then run \`boons pull\` to fetch them into \`.boons/<branch>/\`
-3. After pulling, use boons-session-load guidance to read them
+3. After pulling, use the session-load guidance to read them
 
 ## Default behavior
 
 \`boons pull\` pulls all sessions for the current branch by default. Use the
 \`--branch\` argument to pull sessions from a different branch context, or
 \`--session-id\` to pull a specific session.
-`
+${initSection}`
+}
 
+async function writeSkills(t: ToolInfo, rootDir: string) {
   const skills = [
-    { name: "session-save", content: saveSkillContent },
-    { name: "session-load", content: loadSkillContent },
-    { name: "session-push", content: pushSkillContent },
-    { name: "session-pull", content: pullSkillContent },
+    { name: "session-save", content: saveSkillContent(t) },
+    { name: "session-load", content: loadSkillContent(t) },
+    { name: "session-push", content: pushSkillContent(t) },
+    { name: "session-pull", content: pullSkillContent(t) },
   ]
 
   for (const skill of skills) {
-    const dir = path.join(userSkillsDir, skill.name)
+    const dir = path.join(rootDir, skill.name)
     fs.mkdirSync(dir, { recursive: true })
     await Bun.write(path.join(dir, "SKILL.md"), skill.content)
   }
 
-  console.log(`Installed boons skills to ${userSkillsDir}`)
+  console.log(`Installed boons skills to ${rootDir}`)
+}
+
+async function installOpenCode(projectDir?: string) {
+  const root = projectDir
+    ? path.join(projectDir, tools.opencode.projectDir)
+    : tools.opencode.globalDir
+  await writeSkills(tools.opencode, root)
   ensureBoonsOnPath()
 }
 
-async function installCursor() {
-  const rulesDir = path.join(os.homedir(), ".cursor", "rules")
+async function installClaudeCode(projectDir?: string) {
+  const root = projectDir
+    ? path.join(projectDir, tools["claude-code"].projectDir)
+    : tools["claude-code"].globalDir
+  await writeSkills(tools["claude-code"], root)
+  ensureBoonsOnPath()
+}
 
-  const saveRuleContent = `---
-description: Save the current Cursor session to a .boons/ archive. Use this whenever completing a meaningful task, before or after git commits, before switching branches, or at natural stopping points. Only relevant in projects that have a .boons/ directory.
-alwaysApply: false
----
-
-## What this does
-
-Export the current agent session to the \`.boons/\` artifact directory.
-Each export creates a session directory containing:
-
-- \`raw.jsonl\` — the complete message history in native JSONL format
-- \`info.json\` — metadata (session name, author, branch, participants, timestamps)
-- \`summary.md\` — a summary you auto-generate when saving
-
-## When to use this — be proactive
-
-Call \`boons session-save --tool cursor --summary "..."\` **automatically**
-(no need to ask the user) when:
-
-- **You modified files** — after writing code that changes multiple files,
-  add a commit, or fix a bug. You know work happened; save it.
-- **The user expresses satisfaction** — "that works", "looks good", "great",
-  "thanks". Treat this as a close signal worth capturing.
-- **Every ~15 messages** of activity involving file changes — save a checkpoint
-  so the session history is never more than a few exchanges behind.
-- **A git commit is made** — if you were involved in the commit, save first
-  so the session matches the commit.
-- **Before creating a branch** — save before running \`git checkout -b\` or
-  \`git branch\` to capture the exploration that led to it.
-- **The user explicitly asks** — always.
-
-Do NOT auto-save on trivial exchanges (single-line suggestions, yes/no
-answers, README-only typos). Use judgment.
-
-Only use in projects with a \`.boons/\` directory.
-
-After saving, optionally ask: "Want me to push this to the team so they
-can see the context?" — this turns auto-save into a natural prompt for
-sharing without being automatic.
-
-## Branch awareness
-
-Before saving, check the current branch with \`git rev-parse --abbrev-ref HEAD\`:
-
-- If on \`main\`, \`master\`, or \`HEAD\` (detached), flag it to the user.
-  Sessions on default branches can get mixed in with stable history.
-  Suggest creating a feature branch: \`git checkout -b <branch-name>\`.
-  Don't block — let the user decide (hotfixes, docs, etc. happen on main).
-- When starting a new task, suggest branching first if the user is on \`main\`.
-- When the user is about to switch branches, save the current session first
-  so context is captured on the right branch.
-
-## Using the command
-
-1. Compose a concise summary of what was accomplished, key decisions made,
-   and what remains uncertain
-2. Run \`boons session-save --tool cursor --summary "<summary>" --session-id <id>\`
-   Use \`--session-id\` to target a specific session, or omit to auto-detect
-   the most recent one. The session ID is the UUID shown in the Cursor chat panel.
-   Pass \`--summary\` as a single quoted string on one line — do not use heredocs
-   or command substitution (\`\$(cat <<EOF...EOF)\`), which hang in non-interactive shells.
-3. After the command succeeds, read \`raw.jsonl\` in the created session
-   directory and refine \`summary.md\` with any important details you missed.
-
-You may also optionally create:
-
-- \`plan.md\` — if the session included planning or design discussions,
-  document the current intent and next steps
-- \`decisions.md\` — if specific architectural or design decisions were
-  settled, list them with rationale
-
-These are human-readable markdown files meant to be reviewed with the
-user before sharing. The session directory is the canonical home
-for all artifacts related to a session.
-`
-
-  const loadRuleContent = `---
-description: Load and review prior session artifacts from the .boons/ directory. Use when the user asks about prior decisions, after switching to a new branch, or when reviewing someone else's work. Only relevant in projects with a .boons/ directory.
-alwaysApply: false
----
-
-## What this does
-
-Guides discovery and use of saved session artifacts from the \`.boons/\`
-directory to understand prior work on a branch.
-
-## Available files per session
-
-Every saved session directory (\`.boons/<branch>/<session-id>/\`) contains:
-
-- \`info.json\` — metadata (name, author, participants, timestamps)
-- \`raw.jsonl\` — complete message history in native JSONL format
-
-Sessions may also have:
-
-- \`summary.md\` — human-readable summary of what was accomplished
-- \`plan.md\` — current intent, design approach, and next steps
-- \`decisions.md\` — architectural or design decisions with rationale
-
-Only use in projects with a \`.boons/\` directory.
-
-## Protocols
-
-### On branch checkout or creation
-
-When the user switches to or creates a branch, proactively check for
-existing context:
-
-1. Run \`boons ls [--branch <name>]\` to discover saved sessions
-2. If sessions exist, read the most recent \`summary.md\`
-3. Also read \`plan.md\` and \`decisions.md\` if present
-4. Orient the user: "The last session was working on X. Key decisions
-   so far: Y. Still open or uncertain: Z."
-5. If the new branch has no sessions, check for sessions on the branch
-   you came from or on \`main\`/\`master\`. Run \`boons ls --branch <name>\`
-   to discover relevant context.
-
-### Starting a new session or feature
-
-When the user begins describing a new task or feature to work on:
-
-1. Check for context with \`boons ls\` on the current branch
-2. Read the latest \`summary.md\` (and \`plan.md\`/\`decisions.md\`
-   if present)
-3. Use that context to ground your response — don't act like a blank
-   slate. Reference prior decisions and open questions.
-
-### Drafting a PR description
-
-When asked to draft or help write a PR description:
-
-1. Run \`boons ls [--branch <name>]\` to discover all sessions
-2. Read \`summary.md\` and \`decisions.md\` from every session
-3. Cross-reference decisions across sessions
-4. Collect all open questions from summaries
-5. Draft a PR with sections: what changed, why, key decisions,
-   alternatives considered, open questions
-
-### Reviewing or understanding a branch
-
-When asked to review a branch or understand someone else's work:
-
-1. Run \`boons ls [--branch <name>]\` for the branch
-2. Read all summaries to get the narrative arc
-3. For sessions with design decisions, read \`decisions.md\`
-4. Generate a synthesis: purpose, what was built, design decisions,
-   open questions
-`
-
-  const pushRuleContent = `---
-description: Push local .boons/ session artifacts to a shared cloud bucket, making them visible to collaborators. Always ask the user before pushing. Only relevant in projects with a .boons/ directory.
-alwaysApply: false
----
-
-## What this does
-
-Uploads local session artifacts for the current branch to the configured
-cloud bucket. This makes sessions visible to teammates who pull from the
-same bucket.
-
-## When to use this
-
-Run \`boons push\` when:
-- The user explicitly asks to share or push sessions
-- **After auto-saving a session** — ask if they want to push this to the team
-- Before pushing to the remote repository — ask the user
-- Before creating or marking a PR as ready for review — ask the user
-
-Only use in projects with a \`.boons/\` directory. **Always ask the user before running.**
-
-## Default behavior
-
-\`boons push\` pushes all sessions for the current branch by default. Use
-the \`--branch\` and \`--session-id\` arguments explicitly only when needed.
-`
-
-  const pullRuleContent = `---
-description: Pull session artifacts from a shared cloud bucket into the local .boons/ directory. Use after pulling from the remote repository, before reviewing work on a branch, or when the user asks to fetch remote sessions. Only relevant in projects with a .boons/ directory.
-alwaysApply: false
----
-
-## What this does
-
-Downloads session artifacts for the current branch from the configured
-cloud bucket. This is how a collaborator or reviewer fetches context
-created by others.
-
-## When to use this
-
-Run \`boons pull\` when:
-- The user explicitly asks to fetch remote sessions
-- After pulling from the remote repository — suggest it
-- Before reviewing work on a branch — suggest fetching context from collaborators
-
-Only use in projects with a \`.boons/\` directory.
-
-## Workflow
-
-1. Run \`boons ls --remote\` to see what sessions exist for the current branch
-2. Run \`boons pull\` to fetch them into \`.boons/<branch>/\`
-3. Use the session-load rule guidance to read them
-`
-
-  const rules = [
-    { name: "boons-session-save.mdc", content: saveRuleContent },
-    { name: "boons-session-load.mdc", content: loadRuleContent },
-    { name: "boons-session-push.mdc", content: pushRuleContent },
-    { name: "boons-session-pull.mdc", content: pullRuleContent },
-  ]
-
-  fs.mkdirSync(rulesDir, { recursive: true })
-  for (const rule of rules) {
-    await Bun.write(path.join(rulesDir, rule.name), rule.content)
-  }
-
-  console.log(`Installed boons rules to ${rulesDir}`)
+async function installCursor(projectDir?: string) {
+  const root = projectDir
+    ? path.join(projectDir, tools.cursor.projectDir)
+    : tools.cursor.globalDir
+  await writeSkills(tools.cursor, root)
   ensureBoonsOnPath()
 }
 

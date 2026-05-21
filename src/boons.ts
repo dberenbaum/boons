@@ -606,6 +606,18 @@ After saving, optionally ask: "Want me to push this to the team so they
 can see the context?" — this turns auto-save into a natural prompt for
 sharing without being automatic.
 
+## Branch awareness
+
+Before saving, check the current branch with \`git rev-parse --abbrev-ref HEAD\`:
+
+- If on \`main\`, \`master\`, or \`HEAD\` (detached), flag it to the user.
+  Sessions on default branches can get mixed in with stable history.
+  Suggest creating a feature branch: \`git checkout -b <branch-name>\`.
+  Don't block — let the user decide (hotfixes, docs, etc. happen on main).
+- When starting a new task, suggest branching first if the user is on \`main\`.
+- When the user is about to switch branches, save the current session first
+  so context is captured on the right branch.
+
 ## Handling uninitialized projects
 
 If \`.boons/\` doesn't exist yet in the project root, auto-initialize by
@@ -685,6 +697,9 @@ existing context:
 3. Also read \`plan.md\` and \`decisions.md\` if present
 4. Orient the user: "The last session was working on X. Key decisions
    so far: Y. Still open or uncertain: Z."
+5. If the new branch has no sessions, check for sessions on the branch
+   you came from or on \`main\`/\`master\`. Call \`session-list\` with those
+   branch names to discover relevant context.
 
 This gives the user a running start — they don't have to re-explain
 where things stand.
@@ -879,6 +894,18 @@ After saving, optionally ask: "Want me to push this to the team so they
 can see the context?" — this turns auto-save into a natural prompt for
 sharing without being automatic.
 
+## Branch awareness
+
+Before saving, check the current branch with \`git rev-parse --abbrev-ref HEAD\`:
+
+- If on \`main\`, \`master\`, or \`HEAD\` (detached), flag it to the user.
+  Sessions on default branches can get mixed in with stable history.
+  Suggest creating a feature branch: \`git checkout -b <branch-name>\`.
+  Don't block — let the user decide (hotfixes, docs, etc. happen on main).
+- When starting a new task, suggest branching first if the user is on \`main\`.
+- When the user is about to switch branches, save the current session first
+  so context is captured on the right branch.
+
 ## Using the command
 
 1. Compose a concise summary of what was accomplished, key decisions made,
@@ -947,6 +974,9 @@ existing context:
 3. Also read \`plan.md\` and \`decisions.md\` if present
 4. Orient the user: "The last session was working on X. Key decisions
    so far: Y. Still open or uncertain: Z."
+5. If the new branch has no sessions, check for sessions on the branch
+   you came from or on \`main\`/\`master\`. Run \`boons ls --branch <name>\`
+   to discover relevant context.
 
 This gives the user a running start — they don't have to re-explain
 where things stand.
@@ -1126,6 +1156,18 @@ After saving, optionally ask: "Want me to push this to the team so they
 can see the context?" — this turns auto-save into a natural prompt for
 sharing without being automatic.
 
+## Branch awareness
+
+Before saving, check the current branch with \`git rev-parse --abbrev-ref HEAD\`:
+
+- If on \`main\`, \`master\`, or \`HEAD\` (detached), flag it to the user.
+  Sessions on default branches can get mixed in with stable history.
+  Suggest creating a feature branch: \`git checkout -b <branch-name>\`.
+  Don't block — let the user decide (hotfixes, docs, etc. happen on main).
+- When starting a new task, suggest branching first if the user is on \`main\`.
+- When the user is about to switch branches, save the current session first
+  so context is captured on the right branch.
+
 ## Using the command
 
 1. Compose a concise summary of what was accomplished, key decisions made,
@@ -1187,6 +1229,9 @@ existing context:
 3. Also read \`plan.md\` and \`decisions.md\` if present
 4. Orient the user: "The last session was working on X. Key decisions
    so far: Y. Still open or uncertain: Z."
+5. If the new branch has no sessions, check for sessions on the branch
+   you came from or on \`main\`/\`master\`. Run \`boons ls --branch <name>\`
+   to discover relevant context.
 
 ### Starting a new session or feature
 

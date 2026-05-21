@@ -570,7 +570,7 @@ export default tool({
 
   const saveSkillContent = `---
 name: session-save
-description: Export opencode sessions to .boons/ artifacts directory
+description: Auto-save at natural stopping points: before commits, before branch switches, every ~15 messages, or when user is satisfied. Do NOT ask. Only relevant in projects with a .boons/ directory.
 ---
 
 ## What this does
@@ -652,7 +652,7 @@ for all artifacts related to a session.
 
   const loadSkillContent = `---
 name: session-load
-description: Discover and read session artifacts from .boons/ directory
+description: Load prior context on branch switch, before new features, or when drafting PRs. Read .boons/ session summaries. Only relevant in projects with a .boons/ directory.
 ---
 
 ## What this does
@@ -746,7 +746,7 @@ as the starting point.
 
   const pushSkillContent = `---
 name: session-push
-description: Push session artifacts to a shared cloud bucket
+description: Ask to share after auto-save, before git push, or before PR review. Push .boons/ to cloud. Always ask user. Only relevant in projects with a .boons/ directory.
 ---
 
 ## What this does
@@ -795,7 +795,7 @@ whatever is in the local session directory.
 
   const pullSkillContent = `---
 name: session-pull
-description: Pull session artifacts from a shared cloud bucket
+description: Fetch remote context after git pull or before code review. Pull .boons/ from cloud. Only relevant in projects with a .boons/ directory.
 ---
 
 ## What this does

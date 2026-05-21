@@ -37,7 +37,7 @@ export async function push(opts: PushOptions): Promise<PushResult> {
 
   for await (const match of glob.scan(path.join(cwd, ".boons"))) {
     const parts = match.split("/")
-    const sessionID = parts[1]
+    const sessionID = parts[parts.length - 2]
     sessions.push(sessionID)
   }
 

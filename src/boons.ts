@@ -184,12 +184,12 @@ async function cmdLs(args: Record<string, string>) {
     files: string[]
   }[] = []
 
-  const glob = new Glob("*/*/info.json")
+  const glob = new Glob("**/info.json")
 
   for await (const file of glob.scan(boonsDir)) {
     const parts = file.split("/")
-    const branch = parts[0]
-    const sessionID = parts[1]
+    const branch = parts.slice(0, -2).join("/")
+    const sessionID = parts[parts.length - 2]
 
     if (branchFilter && branch !== branchFilter) continue
 

@@ -81,7 +81,7 @@ async function ask(query: string): Promise<string> {
 
   console.error("Interactive input required but stdin is not a terminal.")
   console.error(
-    "Use provider flags (e.g. boons init --provider gcp --bucket NAME) or run from a terminal.",
+     "Use provider flags (e.g. boons remote --provider gcp --bucket NAME) or run from a terminal.",
   )
   process.exit(1)
 }
@@ -101,22 +101,22 @@ Usage:
                                                       Save session to .boons/
   boons ls [--branch <name>] [--json]                 List saved sessions
   boons ls --remote [--branch <name>] [--json]        List remote sessions
-  boons init [-q | --quiet]                           Create .boons/ dir + update .gitignore (non-interactive)
-  boons init [<provider-flags>]                       Configure cloud remote for repo
-  boons install <toolname>                            Install tools + skills for a tool
-  boons config                                        Show current config
+  boons install <tool>                                Install skills for a tool (+ global .gitignore)
+  boons install <tool> --project                      Install skills + project .gitignore
+  boons remote                                        Show remote config, or prompt if none
+  boons remote --provider aws|gcp|azure ...           Configure cloud remote
+  boons remote --project --provider aws|gcp|azure ... Configure cloud remote per-project
   boons push [--session-id <id>] [--branch <b>]       Push sessions to cloud
   boons pull [--session-id <id>] [--branch <b>]       Pull sessions from cloud
   boons --help                                        Show this message
 
-Provider flags (for init):
+Remote flags:
   --provider aws|gcp|azure  Cloud provider
   --bucket <name>           Bucket name (aws/gcp)
   --region <name>           AWS region
   --account <name>          Azure storage account
   --container <name>        Azure container
   --prefix <path>           Optional key prefix in bucket
-  --global                  Write to ~/.config/boons/config.json (repo-keyed) instead of .boons/config.json
 
 Options:
   --tool <name>       Tool to export from (opencode | claude-code | cursor)
@@ -124,6 +124,11 @@ Options:
   --session-id <id>   Session to export/push/pull (default: auto-detect / all)
   --branch <name>     Filter by branch (default: current branch)
   --json              Output as JSON (for tool integration)
+
+Tools:
+  opencode       OpenAI Codex CLI plugin
+  claude-code    Anthropic Claude Code skills
+  cursor         Cursor MDC rules
 
 Environment:
   BOONS_DB_PATH       OpenCode database path (default: $XDG_DATA_HOME/opencode/opencode.db or ~/.local/share/opencode/opencode.db)
@@ -309,22 +314,11 @@ async function cmdLsRemote(args: Record<string, string>) {
   }
 }
 
-async function cmdInit(args: Record<string, string>) {
-  const cwd = process.cwd()
-  const target = args["--global"] === "true" ? "repo-keyed" : "per-repo"
-  const quiet = args["-q"] === "true" || args["--quiet"] === "true"
+function addBoonsToGitignore(scope: "global" | "project") {
+  const gitignorePath = scope === "global"
+    ? path.join(os.homedir(), ".config", "git", "ignore")
+    : path.join(process.cwd(), ".gitignore")
 
-  if (quiet) {
-    const boonsDir = path.join(cwd, ".boons")
-    fs.mkdirSync(boonsDir, { recursive: true })
-    console.log(`Created ${boonsDir}`)
-  } else {
-    await configureCloud(cwd, args, target)
-  }
-
-  if (target !== "per-repo") return
-
-  const gitignorePath = path.join(cwd, ".gitignore")
   const gitignoreContent = (() => {
     try { return fs.readFileSync(gitignorePath, "utf-8") } catch { return "" }
   })()
@@ -340,32 +334,10 @@ async function cmdInit(args: Record<string, string>) {
     updated = (updated.endsWith("\n") ? updated : updated + "\n") + ".boons/\n!.boons/config.json\n"
   }
   if (updated !== gitignoreContent) {
+    fs.mkdirSync(path.dirname(gitignorePath), { recursive: true })
     fs.writeFileSync(gitignorePath, updated)
-    console.log("Updated .gitignore with .boons/ entries")
+    console.log(`Updated ${scope === "global" ? "global" : "project"} .gitignore with .boons/ entries`)
   }
-}
-
-async function configureCloud(cwd: string, args: Record<string, string>, target: "per-repo" | "repo-keyed" | "global-default") {
-  const providerFlag = args["--provider"]
-  const hasFlags = providerFlag || args["--bucket"] || args["--account"] || args["--container"]
-
-  if (hasFlags) {
-    const remote: Record<string, string> = { provider: providerFlag || "" }
-    if (args["--bucket"]) remote.bucket = args["--bucket"]
-    if (args["--region"]) remote.region = args["--region"]
-    if (args["--account"]) remote.account = args["--account"]
-    if (args["--container"]) remote.container = args["--container"]
-    if (args["--prefix"]) remote.prefix = args["--prefix"]
-    writeConfigTarget(target, { remote: remote as any }, cwd)
-    console.log(`Configured remote: ${providerFlag}${remote.bucket ? ` (bucket: ${remote.bucket})` : ""}${remote.account ? ` (account: ${remote.account})` : ""}`)
-    return
-  }
-
-  const remote = await askRemoteConfig()
-  if (!remote) return
-
-  writeConfigTarget(target, { remote }, cwd)
-  console.log(`Configured remote: ${remote.provider}${remote.bucket ? ` (bucket: ${remote.bucket})` : ""}${remote.account ? ` (account: ${remote.account})` : ""}`)
 }
 
 async function askRemoteConfig(skipConfirm = false): Promise<RemoteConfig | null> {
@@ -426,7 +398,7 @@ function writeConfigTarget(target: "per-repo" | "repo-keyed" | "global-default",
   }
 }
 
-async function cmdInstall(tool: string) {
+async function cmdInstall(tool: string, args: Record<string, string>) {
   if (!isKnownTool(tool)) {
     console.error(`Unknown tool: "${tool}". Supported: ${validTools().join(", ")}`)
     process.exit(1)
@@ -438,6 +410,12 @@ async function cmdInstall(tool: string) {
     await installClaudeCode()
   } else if (tool === "cursor") {
     await installCursor()
+  }
+
+  if (args["--project"] === "true") {
+    addBoonsToGitignore("project")
+  } else {
+    addBoonsToGitignore("global")
   }
 }
 
@@ -484,7 +462,7 @@ export default tool({
   async execute(args, context) {
     if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
       try {
-        await Bun.$\`boons init -q\`
+        await Bun.$\`boons install --project\`
       } catch {
         return "boons is not available. Install it from https://github.com/anomalyco/boons"
       }
@@ -508,7 +486,7 @@ export default tool({
   async execute(args, context) {
     if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
       try {
-        await Bun.$\`boons init -q\`
+        await Bun.$\`boons install --project\`
       } catch {
         return "boons is not available. Install it from https://github.com/anomalyco/boons"
       }
@@ -532,7 +510,7 @@ export default tool({
   async execute(args, context) {
     if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
       try {
-        await Bun.$\`boons init -q\`
+        await Bun.$\`boons install --project\`
       } catch {
         return "boons is not available. Install it from https://github.com/anomalyco/boons"
       }
@@ -555,7 +533,7 @@ export default tool({
   async execute(args, context) {
     if (!fs.existsSync(path.join(context.worktree, ".boons"))) {
       try {
-        await Bun.$\`boons init -q\`
+        await Bun.$\`boons install --project\`
       } catch {
         return "boons is not available. Install it from https://github.com/anomalyco/boons"
       }
@@ -579,7 +557,7 @@ export default tool({
     const boonsDir = path.join(context.worktree, ".boons")
     if (!fs.existsSync(boonsDir)) {
       try {
-        await Bun.$\`boons init -q\`
+        await Bun.$\`boons install --project\`
       } catch {
         return "boons is not available. Install it from https://github.com/anomalyco/boons"
       }
@@ -631,7 +609,7 @@ sharing without being automatic.
 ## Handling uninitialized projects
 
 If \`.boons/\` doesn't exist yet in the project root, auto-initialize by
-running \`boons init -q\`. The tool handles this automatically, but check
+running \`boons install --project\`. The tool handles this automatically, but check
 that the command is available first.
 
 ## Using the tool
@@ -777,14 +755,14 @@ Call \`session-push\` when:
 - **User explicitly asks** to push or share: just call \`session-push\`. It
   auto-initializes boons if needed.
 - **Agent-proactive suggestion** (after auto-save, before push, before PR):
-  first check if \`.boons/\` exists. If not, suggest running \`boons init -q\`
+  first check if \`.boons/\` exists. If not, suggest running \`boons install --project\`
   instead of pushing. Always ask the user before running.
 
 ## Before first push
 
-Make sure your cloud bucket has **object versioning** enabled. This gives you
-the ability to recover from accidental overwrites — boons doesn't prevent
-overwriting sessions, so versioning is your safety net.
+Object versioning on your cloud bucket is **recommended** — it gives you
+the ability to recover from accidental overwrites since boons doesn't
+prevent overwriting sessions.
 
 ## Default behavior
 
@@ -824,7 +802,7 @@ Call \`session-pull\` when:
   It auto-initializes boons if needed.
 - **Agent-proactive suggestion** (after git pull, before review): first check
   if \`.boons/\` exists. If not, skip the suggestion or suggest running
-  \`boons init -q\`.
+  \`boons install --project\`.
 
 ## Workflow
 
@@ -856,18 +834,6 @@ Call \`session-pull\` when:
   console.log(`Installed boons tools to ${toolsDir}`)
   console.log(`Installed boons skills to ${skillsDir}`)
   ensureBoonsOnPath()
-
-  const globalCfg = readGlobalConfig()
-  if (!globalCfg.default) {
-    const answer = await ask("Set up a global default cloud config for sharing sessions? (y/N)")
-    if (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes") {
-      const remote = await askRemoteConfig(true)
-      if (remote) {
-        writeConfigTarget("global-default", { remote }, process.cwd())
-        console.log(`Configured default: ${remote.provider}${remote.bucket ? ` (bucket: ${remote.bucket})` : ""}${remote.account ? ` (account: ${remote.account})` : ""}`)
-      }
-    }
-  }
 }
 
 async function installClaudeCode() {
@@ -1048,9 +1014,9 @@ Only use in projects with a \`.boons/\` directory. **Always ask the user before 
 
 ## Before first push
 
-Make sure your cloud bucket has **object versioning** enabled. This gives you
-the ability to recover from accidental overwrites — boons doesn't prevent
-overwriting sessions, so versioning is your safety net.
+Object versioning on your cloud bucket is **recommended** — it gives you
+the ability to recover from accidental overwrites since boons doesn't
+prevent overwriting sessions.
 
 ## Default behavior
 
@@ -1324,15 +1290,38 @@ Only use in projects with a \`.boons/\` directory.
   ensureBoonsOnPath()
 }
 
-async function cmdConfig() {
-  const resolved = resolveConfig()
-  if (!resolved) {
-    console.log("No remote configured.")
-    console.log("Run `boons init --provider aws|gcp|azure --bucket <name>` or set up ~/.config/boons/config.json")
+async function cmdRemote(args: Record<string, string>) {
+  const cwd = process.cwd()
+  const target = args["--project"] === "true" ? "per-repo" : "global-default"
+  const hasProviderFlags = args["--provider"] || args["--bucket"] || args["--account"] || args["--container"]
+
+  if (hasProviderFlags) {
+    const remote: Record<string, string> = { provider: args["--provider"] || "" }
+    if (args["--bucket"]) remote.bucket = args["--bucket"]
+    if (args["--region"]) remote.region = args["--region"]
+    if (args["--account"]) remote.account = args["--account"]
+    if (args["--container"]) remote.container = args["--container"]
+    if (args["--prefix"]) remote.prefix = args["--prefix"]
+    writeConfigTarget(target, { remote: remote as any }, cwd)
+    console.log(`Configured remote: ${args["--provider"]}${remote.bucket ? ` (bucket: ${remote.bucket})` : ""}${remote.account ? ` (account: ${remote.account})` : ""}`)
     return
   }
-  console.log(`Source: ${resolved.source}`)
-  console.log(JSON.stringify(resolved.remote, null, 2))
+
+  const resolved = resolveConfig()
+  if (resolved) {
+    console.log(`Source: ${resolved.source}`)
+    console.log(JSON.stringify(resolved.remote, null, 2))
+    return
+  }
+
+  const answer = await ask("Configure cloud remote for sharing sessions? (y/N)")
+  if (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes") {
+    const remote = await askRemoteConfig(true)
+    if (remote) {
+      writeConfigTarget(target, { remote }, cwd)
+      console.log(`Configured remote: ${remote.provider}${remote.bucket ? ` (bucket: ${remote.bucket})` : ""}${remote.account ? ` (account: ${remote.account})` : ""}`)
+    }
+  }
 }
 
 async function cmdPush(args: Record<string, string>) {
@@ -1414,18 +1403,16 @@ async function main() {
     case "ls":
       await cmdLs(opts)
       break
-    case "init":
-      await cmdInit(opts)
-      break
     case "install":
-      if (args.length < 2) {
-        console.error("Usage: boons install <toolname>")
+      const tool = args.slice(1).find(a => !a.startsWith("-"))
+      if (!tool) {
+        console.log(HELP)
         process.exit(1)
       }
-      await cmdInstall(args[1])
+      await cmdInstall(tool, opts)
       break
-    case "config":
-      await cmdConfig()
+    case "remote":
+      await cmdRemote(opts)
       break
     case "push":
       await cmdPush(opts)

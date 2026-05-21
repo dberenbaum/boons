@@ -37,7 +37,7 @@ curl -fsSL https://raw.githubusercontent.com/dberenbaum/boons/main/install.sh | 
 boons install opencode
 ```
 
-That's it. Your agent will now auto-save sessions on this project. Optionally configure cloud storage when prompted to enable sharing.
+That's it. Your agent will now auto-save sessions on this project. To enable sharing, configure cloud storage with `boons remote`.
 
 ## Agent Behavior
 
@@ -66,14 +66,14 @@ boons install claude-code # Claude Code plugin + skills
 boons install cursor      # Cursor .mdc rules
 ```
 
-Each install command writes the agent skills and tool definitions that enable auto-save. It also optionally configures a cloud bucket for sharing.
+Each install command writes the agent skills and tool definitions that enable auto-save.
 
 Cloud storage can be configured later with:
 
 ```sh
-boons init --provider gcp --bucket my-bucket
-boons init --provider aws --bucket my-bucket --region us-east-1
-boons init --provider azure --account myact --container mycont
+boons remote --provider gcp --bucket my-bucket
+boons remote --provider aws --bucket my-bucket --region us-east-1
+boons remote --provider azure --account myact --container mycont
 ```
 
 ## Design
@@ -117,9 +117,11 @@ boons session-save --tool <name> [--session-id <id>] [--summary <text>]
                                                   Save session to .boons/
 boons ls [--branch <name>]                        List local sessions
 boons ls --remote [--branch <name>]                List remote sessions
-boons init [--provider aws|gcp|azure ...]          Configure remote
-boons install <toolname>                           Install tools + skills
-boons config                                       Show current config
+boons install <tool>                               Install skills for a tool
+boons install <tool> --project                     Install skills + project .gitignore
+boons remote                                       Show remote config, or prompt if none
+boons remote --provider aws|gcp|azure ...           Configure remote
+boons remote --project --provider aws|gcp|azure    Configure remote per-project
 boons push [--session-id <id>] [--branch <b>]      Push sessions to cloud
 boons pull [--session-id <id>] [--branch <b>]      Pull from cloud
 ```
@@ -128,4 +130,4 @@ boons pull [--session-id <id>] [--branch <b>]      Pull from cloud
 
 - [Bun](https://bun.sh) runtime (install script handles this)
 - Cloud CLI: `awscli`, `gsutil`, or `azcopy` (matching your provider)
-- Cloud bucket with object versioning enabled
+- Cloud bucket (object versioning recommended for recovery from overwrites)

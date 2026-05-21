@@ -19,7 +19,7 @@ export interface PushResult {
 export async function push(opts: PushOptions): Promise<PushResult> {
   const cwd = opts.directory ?? process.cwd()
   const resolved = resolveConfig(cwd)
-  if (!resolved) throw new Error("No remote configured. Run `boons init --provider <name> --bucket <name>` or set up ~/.config/boons/config.json first.")
+  if (!resolved) throw new Error("No remote configured. Run `boons remote --provider <name> --bucket <name>` or set up ~/.config/boons/config.json first.")
   const remote = resolved.remote
 
   const provider = createProvider(remote)

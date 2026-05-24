@@ -8,8 +8,9 @@ AI coding sessions hold the decisions, rationale, and exploration that never mak
 
 Boons makes sessions persistent by default — your agent auto-saves them as you work. The immediate payoff is personal:
 
-- **Context switching** — Switch back to a branch after a meeting or a day off. Your agent reads your last session and picks up where you left off.
-- **Standup / status** — "What did I accomplish yesterday?" Your session summaries have the answer.
+- **Context switching** — No more neverending sessions to maintain context. Recover from crashed sessions and switch between sessions with ease.
+- **Multitasking** — Keep feature components isolated in separate discussions but maintain the ability
+  to reference the latest across all related sessions.
 - **PR descriptions** — Ask your agent to draft a PR from the session summaries on the branch. Grounded in actual work, not memory.
 
 The team benefit is the same context, shared:
@@ -17,6 +18,13 @@ The team benefit is the same context, shared:
 - **Reviewers arrive informed** — Pull a branch, pull the sessions. Full decision history before reading a line of code.
 - **Onboarding** — New team members read how and why the codebase evolved, without chasing down the people who were there.
 - **Answers survive the people** — "Why didn't we consider X?" The sessions still have the answer.
+
+What differentiates this project from others that persist or share sessions is provenance —
+attaching sessions to the projects and branches that shaped them, so context is organized the same
+way teams already organize their work. Storage reflects how agents actually work: plain text files
+at multiple levels of detail, from raw message logs to human-readable summaries with flexibility to
+add other documents as needed. Agents parse natural language from files; context length is managed
+by the branch organization and the summary info stored with each session.
 
 ## How It Works
 
@@ -78,19 +86,23 @@ boons remote --provider azure --account myact --container mycont
 
 ## Design
 
-**Branch as collaboration space.** Work on a branch is not private until a PR. Sessions accumulate from the moment the branch is created — exploratory, design, implementation, review. The PR is the final checkpoint, not the start of review.
+Boons adapts version control principles to agentic workflows:
 
-**Sessions as artifacts, not ephemera.** A session directory holds the complete raw record (`raw.jsonl`) alongside human-readable artifacts (`summary.md`, `plan.md`, `decisions.md`). The raw log is append-only and never modified. Summaries and plans are mutable — updated in place as understanding evolves.
+**Git for references not storage.** Sessions aren't checked into the repo but reference the branch,
+keeping a connection to git while avoiding storage bloat and decoupling session sync from commits
+(for example, pushing additional context or cleaning up old sessions without touching history).
 
-**Auto-save by default, share on request.** Sessions are saved automatically so nothing is lost. Sharing to the cloud is deliberate — nothing is synced without asking.
+**Scope by branches not commits.** Sessions span multiple commits and map naturally to branches
+as both are scoped to features. Branches are broad enough to include the full feature arc but
+specific enough to limit context to what's relevant.
 
-**Cloud bucket for remote, not git.** Sessions don't bloat the repository. The bucket mirrors the local `.boons/` structure, navigable directly in any cloud storage browser.
+**Track sessions not files.** Unlike code files which are modified in place, sessions are
+append-only and may produce artifacts across multiple files (plans, summaries, etc.). The session is
+the meaningful unit of work.
 
-**Provenance over convenience.** Every artifact carries tool, author, branch, and timestamps. You can always answer who created what, when, and on which branch.
-
-**CLI-first, agent-aware.** The CLI handles all mechanical operations (export, push, pull, list). Agents provide judgment, discovery, and workflow guidance through tool integrations and skills.
-
-**Zero npm dependencies.** Uses Bun built-ins (`bun:sqlite`, `Glob`, `Bun.$`) and platform cloud CLIs (`aws`, `gsutil`, `azcopy`).
+The result is not a version control system (changes to session outputs overwrite the previous
+outputs), but it preserves meaningful provenance. The goal is to reference relevant historical
+context.
 
 ## Supported Tools
 

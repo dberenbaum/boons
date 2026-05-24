@@ -501,9 +501,33 @@ async function cmdInstall(tool: string, args: Record<string, string>) {
 
   if (projectDir) {
     addBoonsToGitignore("project")
+    addAgentsPointer()
   } else {
     addBoonsToGitignore("global")
   }
+}
+
+function addAgentsPointer() {
+  const agentsPath = path.join(process.cwd(), "agents.md")
+  const block = [
+    "# boons",
+    "",
+    "This project uses boons for session artifacts. Skill files in this repo",
+    "contain guidance for saving progress and sharing context. Load and follow",
+    "them, especially at natural stopping points.",
+    "",
+  ].join("\n")
+
+  const existing = (() => {
+    try { return fs.readFileSync(agentsPath, "utf-8") } catch { return "" }
+  })()
+
+  if (existing.includes("# boons\n\nThis project uses boons for session artifacts.")) return
+  const updated = existing.endsWith("\n") || existing === ""
+    ? existing + block
+    : existing + "\n" + block
+  fs.writeFileSync(agentsPath, updated)
+  console.log("Added boons pointer to agents.md")
 }
 
 function ensureBoonsOnPath() {

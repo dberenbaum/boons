@@ -21,7 +21,7 @@ export interface MessageEntry {
 }
 
 export function getDefaultDBPath(): string {
-  if (process.env.BOONS_DB_PATH) return process.env.BOONS_DB_PATH
+  if (process.env.BOONS_OPENCODE_DIR) return path.join(process.env.BOONS_OPENCODE_DIR, "opencode.db")
   const dataHome = process.env.XDG_DATA_HOME
     ?? path.join(os.homedir(), ".local/share")
   return path.join(dataHome, "opencode", "opencode.db")

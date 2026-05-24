@@ -101,8 +101,8 @@ Usage:
                                                       Save session to .boons/
   boons ls [--branch <name>] [--json]                 List saved sessions
   boons ls --remote [--branch <name>] [--json]        List remote sessions
-  boons install <tool>                                Install skills for a tool (+ global .gitignore)
-  boons install <tool> --project                      Install skills + project .gitignore
+  boons install <tool>                                Install skills globally for a tool (+ global .gitignore)
+  boons install <tool> --project                      Install skills scoped to the project (+ project .gitignore)
   boons remote                                        Show remote config, or prompt if none
   boons remote --provider aws|gcp|azure ...           Configure cloud remote
   boons remote --project --provider aws|gcp|azure ... Configure cloud remote per-project
@@ -131,7 +131,7 @@ Tools:
   cursor         Cursor MDC rules
 
 Environment:
-  BOONS_DB_PATH       OpenCode database path (default: $XDG_DATA_HOME/opencode/opencode.db or ~/.local/share/opencode/opencode.db)
+  BOONS_OPENCODE_DIR  OpenCode data directory (default: $XDG_DATA_HOME/opencode or ~/.local/share/opencode)
   BOONS_CLAUDE_DIR    Claude Code projects directory (default: ~/.claude/projects)
   BOONS_CURSOR_DIR    Cursor projects directory (default: ~/.cursor/projects)
 `

@@ -1,5 +1,7 @@
 # Boons
 
+AI coding sessions that persist, travel, and compound.
+
 Capture, share, and reload AI coding session context across your team.
 
 ## Why
@@ -9,8 +11,7 @@ AI coding sessions hold the decisions, rationale, and exploration that never mak
 Boons makes sessions persistent by default — your agent auto-saves them as you work. The immediate payoff is personal:
 
 - **Context switching** — No more neverending sessions to maintain context. Recover from crashed sessions and switch between sessions with ease.
-- **Multitasking** — Keep feature components isolated in separate discussions but maintain the ability
-  to reference the latest across all related sessions.
+- **Multitasking** — Keep feature components isolated in separate discussions but maintain the ability to reference the latest across all related sessions.
 - **PR descriptions** — Ask your agent to draft a PR from the session summaries on the branch. Grounded in actual work, not memory.
 
 The team benefit is the same context, shared:
@@ -19,14 +20,14 @@ The team benefit is the same context, shared:
 - **Onboarding** — New team members read how and why the codebase evolved, without chasing down the people who were there.
 - **Answers survive the people** — "Why didn't we consider X?" The sessions still have the answer.
 
+## How It Works
+
 What differentiates this project from others that persist or share sessions is provenance —
 attaching sessions to the projects and branches that shaped them, so context is organized the same
 way teams already organize their work. Storage reflects how agents actually work: plain text files
 at multiple levels of detail, from raw message logs to human-readable summaries with flexibility to
-add other documents as needed. Agents parse natural language from files; context length is managed
-by the branch organization and the summary info stored with each session.
-
-## How It Works
+add other documents as needed. Agents parse natural language from files, and context length is
+managed by the branch organization and the summary info stored with each session.
 
 Every session on a branch is saved into `.boons/<branch>/<session-id>/`, a gitignored directory containing:
 
@@ -101,8 +102,8 @@ append-only and may produce artifacts across multiple files (plans, summaries, e
 the meaningful unit of work.
 
 The result is not a version control system (changes to session outputs overwrite the previous
-outputs), but it preserves meaningful provenance. The goal is to reference relevant historical
-context.
+outputs), but it preserves meaningful provenance. In agentic workflows, the goal shifts from
+reproducing past states to finding and using relevant historical context.
 
 ## Supported Tools
 

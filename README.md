@@ -130,8 +130,8 @@ boons session-save --tool <name> [--session-id <id>] [--summary <text>]
                                                   Save session to .boons/
 boons ls [--branch <name>]                        List local sessions
 boons ls --remote [--branch <name>]                List remote sessions
-boons install <tool>                               Install skills scoped to the project (+ project .gitignore + agents.md)
-boons install <tool> --global                      Install skills globally for a tool (+ global .gitignore)
+boons install <tool>                               Install skills for a tool (+ global .gitignore + global rules)
+boons install <tool> --project                     Install skills scoped to the project (+ project .gitignore + project rules)
 boons remote                                       Show remote config, or prompt if none
 boons remote --provider aws|gcp|azure ...           Configure remote
 boons remote --project --provider aws|gcp|azure    Configure remote per-project

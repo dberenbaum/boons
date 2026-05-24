@@ -117,8 +117,8 @@ Usage:
                                                         Save session + authored files
   boons ls [--branch <name>] [--json]                   List saved sessions
   boons ls --remote [--branch <name>] [--json]          List remote sessions
-  boons install <tool>                                  Install skills scoped to the project (+ project .gitignore + agents.md)
-  boons install <tool> --global                         Install skills globally for a tool (+ global .gitignore)
+  boons install <tool>                                Install skills for a tool (+ global .gitignore + global rules)
+  boons install <tool> --project                      Install skills scoped to the project (+ project .gitignore + project rules)
   boons remote                                          Show remote config, or prompt if none
   boons remote --provider aws|gcp|azure ...             Configure cloud remote
   boons remote --project --provider aws|gcp|azure ...   Configure cloud remote per-project
@@ -140,6 +140,7 @@ Options:
   --session-id <id>   Session to read/save/push/pull (required for session-read, auto-detect for others)
   --file <path>       File to include in session directory (repeatable, for session-save)
   --branch <name>     Filter by branch (default: current branch)
+  --global            Install globally (default; use --project for project-scoped)
   --json              Output as JSON (for tool integration)
 
 Tools:
@@ -489,8 +490,7 @@ async function cmdInstall(tool: string, args: Record<string, string>) {
     process.exit(1)
   }
 
-  const isGlobal = args["--global"] === "true"
-  const projectDir = isGlobal ? undefined : process.cwd()
+  const projectDir = args["--project"] === "true" ? process.cwd() : undefined
 
   if (tool === "opencode") {
     await installOpenCode(projectDir)
@@ -500,35 +500,55 @@ async function cmdInstall(tool: string, args: Record<string, string>) {
     await installCursor(projectDir)
   }
 
+  const info = tools[tool]
+
   if (projectDir) {
     addBoonsToGitignore("project")
-    addAgentsPointer()
+    addRulesPointer(path.join(process.cwd(), info.projectRulesFile))
   } else {
     addBoonsToGitignore("global")
+    if (info.globalRulesFile) {
+      addRulesPointer(path.join(os.homedir(), info.globalRulesFile))
+    } else {
+      console.log("Cursor stores global rules in its internal database.")
+      console.log("Open Settings > Rules > User Rules and paste:")
+      console.log("")
+      console.log("# boons")
+      console.log("")
+      console.log("Before committing, pushing, or switching branches — and every ~15")
+      console.log("messages — load the session-save skill and follow its guidance.")
+      console.log("")
+      console.log("Also available: session-load (prior context), session-push (share")
+      console.log("to cloud), session-pull (fetch from cloud).")
+    }
   }
 }
 
-function addAgentsPointer() {
-  const agentsPath = path.join(process.cwd(), "agents.md")
+function addRulesPointer(filePath: string) {
   const block = [
     "# boons",
     "",
-    "This project uses boons for session artifacts. Skill files in this repo",
-    "contain guidance for saving progress and sharing context. Load and follow",
-    "them, especially at natural stopping points.",
+    "Before committing, pushing, or switching branches — and every ~15",
+    "messages — load the session-save skill and follow its guidance.",
+    "",
+    "Also available: session-load (prior context), session-push (share",
+    "to cloud), session-pull (fetch from cloud).",
     "",
   ].join("\n")
 
   const existing = (() => {
-    try { return fs.readFileSync(agentsPath, "utf-8") } catch { return "" }
+    try { return fs.readFileSync(filePath, "utf-8") } catch { return "" }
   })()
 
-  if (existing.includes("# boons\n\nThis project uses boons for session artifacts.")) return
-  const updated = existing.endsWith("\n") || existing === ""
+  if (existing.includes("# boons\n\nBefore committing")) return
+
+  const updated = existing === "" || existing.endsWith("\n")
     ? existing + block
     : existing + "\n" + block
-  fs.writeFileSync(agentsPath, updated)
-  console.log("Added boons pointer to agents.md")
+
+  fs.mkdirSync(path.dirname(filePath), { recursive: true })
+  fs.writeFileSync(filePath, updated)
+  console.log(`Added boons rule to ${path.basename(filePath)}`)
 }
 
 function ensureBoonsOnPath() {
@@ -584,8 +604,9 @@ interface ToolInfo {
   name: string
   globalDir: string
   projectDir: string
-  hasInit: boolean
   extraSave: string
+  projectRulesFile: string
+  globalRulesFile: string
 }
 
 const tools: Record<string, ToolInfo> = {
@@ -595,8 +616,9 @@ const tools: Record<string, ToolInfo> = {
     name: "session",
     globalDir: path.join(os.homedir(), ".config", "opencode", "skills"),
     projectDir: ".opencode/skills",
-    hasInit: true,
     extraSave: "",
+    projectRulesFile: "AGENTS.md",
+    globalRulesFile: ".config/opencode/AGENTS.md",
   },
   "claude-code": {
     flag: "claude-code",
@@ -604,8 +626,9 @@ const tools: Record<string, ToolInfo> = {
     name: "boons-session",
     globalDir: path.join(os.homedir(), ".claude", "skills"),
     projectDir: ".claude/skills",
-    hasInit: false,
     extraSave: "",
+    projectRulesFile: "CLAUDE.md",
+    globalRulesFile: ".claude/CLAUDE.md",
   },
   cursor: {
     flag: "cursor",
@@ -613,23 +636,17 @@ const tools: Record<string, ToolInfo> = {
     name: "boons-session",
     globalDir: path.join(os.homedir(), ".cursor", "skills"),
     projectDir: ".cursor/skills",
-    hasInit: false,
     extraSave: `   Use \`--session-id\` to target a specific session, or omit to auto-detect
    the most recent one. The session ID is the UUID shown in the ${"Cursor"} chat panel.
    Pass \`--summary\` as a single quoted string on one line — do not use heredocs
    or command substitution (\`\$(cat <<EOF...EOF)\`), which hang in non-interactive shells.`,
+    projectRulesFile: ".cursorrules",
+    globalRulesFile: "",
   },
 }
 
 function saveSkillContent(t: ToolInfo): string {
-  const initSection = t.hasInit ? `
-## Handling uninitialized projects
-
-If \`.boons/\` doesn't exist yet in the project root, auto-initialize by
-running \`boons install ${t.flag}\`. The tool handles this automatically, but check
-that the command is available first.
-` : ""
-  const onlyUse = t.hasInit ? "" : `
+  const onlyUse = `
 Only use in projects with a \`.boons/\` directory.
 `
   return `---
@@ -682,7 +699,6 @@ Before saving, check the current branch with \`git rev-parse --abbrev-ref HEAD\`
 - When starting a new task, suggest branching first if the user is on \`main\`.
 - When the user is about to switch branches, save the current session first
   so context is captured on the right branch.
-${initSection}
 ## Using the command
 
 1. Run \`boons session-read --tool ${t.flag} --session-id <id>\` to review the
@@ -716,15 +732,7 @@ for all artifacts related to a session.
 }
 
 function loadSkillContent(t: ToolInfo): string {
-  const initSection = t.hasInit ? `
-## Handling uninitialized projects
-
-If \`.boons/\` doesn't exist in the project, it will be auto-initialized
-on first session-save. But if you're suggesting a load proactively (not
-in response to a user request), check that \`.boons/\` exists first
-and skip the suggestion if it doesn't.
-` : ""
-  const onlyUse = t.hasInit ? "" : `
+  const onlyUse = `
 Only use in projects with a \`.boons/\` directory.
 `
   return `---
@@ -753,7 +761,7 @@ Sessions may also have additional files generated after export:
 - Any other docs the author created
 
 To see which files are present for a particular session, list its directory.
-${initSection}${onlyUse}
+${onlyUse}
 ## Protocols
 
 ### On branch checkout or creation
@@ -829,16 +837,7 @@ as the starting point.
 }
 
 function pushSkillContent(t: ToolInfo): string {
-  const initSection = t.hasInit ? `
-## Handling uninitialized projects
-
-- **User explicitly asks** to push or share: just run \`boons push\`. It
-  auto-initializes boons if needed.
-- **Agent-proactive suggestion** (after auto-save, before push, before PR):
-  first check if \`.boons/\` exists. If not, suggest running \`boons install ${t.flag}\`
-  instead of pushing. Always ask the user before running.
-` : ""
-  const onlyUse = t.hasInit ? "" : `Only use in projects with a \`.boons/\` directory. `
+  const onlyUse = `Only use in projects with a \`.boons/\` directory. `
   return `---
 name: ${t.name}-push
 description: Ask to share after auto-save, before git push, or before PR review. Push .boons/ to cloud. Always ask user. Only relevant in projects with a .boons/ directory.
@@ -859,7 +858,6 @@ Run \`boons push\` when:
 - Before creating or marking a PR as ready for review — ask the user
 
 ${onlyUse}**Always ask the user before running** — this shares session data with others.
-${initSection}
 ## Before first push
 
 Object versioning on your cloud bucket is **recommended** — it gives you
@@ -882,16 +880,7 @@ whatever is in the local session directory.
 }
 
 function pullSkillContent(t: ToolInfo): string {
-  const initSection = t.hasInit ? `
-## Handling uninitialized projects
-
-- **User explicitly asks** to fetch remote sessions: just run \`boons pull\`.
-  It auto-initializes boons if needed.
-- **Agent-proactive suggestion** (after git pull, before review): first check
-  if \`.boons/\` exists. If not, skip the suggestion or suggest running
-  \`boons install ${t.flag}\`.
-` : ""
-  const onlyUse = t.hasInit ? "" : `
+  const onlyUse = `
 Only use in projects with a \`.boons/\` directory.
 `
   return `---
@@ -923,8 +912,8 @@ ${onlyUse}
 
 \`boons pull\` pulls all sessions for the current branch by default. Use the
 \`--branch\` argument to pull sessions from a different branch context, or
-\`--session-id\` to pull a specific session.
-${initSection}`
+  \`--session-id\` to pull a specific session.
+`
 }
 
 async function writeSkills(t: ToolInfo, rootDir: string) {

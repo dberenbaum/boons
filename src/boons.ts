@@ -117,8 +117,8 @@ Usage:
                                                         Save session + authored files
   boons ls [--branch <name>] [--json]                   List saved sessions
   boons ls --remote [--branch <name>] [--json]          List remote sessions
-  boons install <tool>                                  Install skills globally for a tool (+ global .gitignore)
-  boons install <tool> --project                        Install skills scoped to the project (+ project .gitignore)
+  boons install <tool>                                  Install skills scoped to the project (+ project .gitignore + agents.md)
+  boons install <tool> --global                         Install skills globally for a tool (+ global .gitignore)
   boons remote                                          Show remote config, or prompt if none
   boons remote --provider aws|gcp|azure ...             Configure cloud remote
   boons remote --project --provider aws|gcp|azure ...   Configure cloud remote per-project
@@ -489,7 +489,8 @@ async function cmdInstall(tool: string, args: Record<string, string>) {
     process.exit(1)
   }
 
-  const projectDir = args["--project"] === "true" ? process.cwd() : undefined
+  const isGlobal = args["--global"] === "true"
+  const projectDir = isGlobal ? undefined : process.cwd()
 
   if (tool === "opencode") {
     await installOpenCode(projectDir)
@@ -625,7 +626,7 @@ function saveSkillContent(t: ToolInfo): string {
 ## Handling uninitialized projects
 
 If \`.boons/\` doesn't exist yet in the project root, auto-initialize by
-running \`boons install --project\`. The tool handles this automatically, but check
+running \`boons install ${t.flag}\`. The tool handles this automatically, but check
 that the command is available first.
 ` : ""
   const onlyUse = t.hasInit ? "" : `
@@ -834,7 +835,7 @@ function pushSkillContent(t: ToolInfo): string {
 - **User explicitly asks** to push or share: just run \`boons push\`. It
   auto-initializes boons if needed.
 - **Agent-proactive suggestion** (after auto-save, before push, before PR):
-  first check if \`.boons/\` exists. If not, suggest running \`boons install --project\`
+  first check if \`.boons/\` exists. If not, suggest running \`boons install ${t.flag}\`
   instead of pushing. Always ask the user before running.
 ` : ""
   const onlyUse = t.hasInit ? "" : `Only use in projects with a \`.boons/\` directory. `
@@ -888,7 +889,7 @@ function pullSkillContent(t: ToolInfo): string {
   It auto-initializes boons if needed.
 - **Agent-proactive suggestion** (after git pull, before review): first check
   if \`.boons/\` exists. If not, skip the suggestion or suggest running
-  \`boons install --project\`.
+  \`boons install ${t.flag}\`.
 ` : ""
   const onlyUse = t.hasInit ? "" : `
 Only use in projects with a \`.boons/\` directory.

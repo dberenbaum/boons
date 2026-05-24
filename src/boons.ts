@@ -5,6 +5,21 @@ import * as readline from "node:readline"
 import { Glob } from "bun"
 import { exportSession, isKnownTool, validTools } from "./export"
 import {
+  getDefaultDBPath,
+  readSessionFromDB,
+  readMessagesFromDB,
+} from "./opencode"
+import {
+  getDefaultProjectsDir as getClaudeProjectsDir,
+  readSessionFromFile as readClaudeSessionFromFile,
+  readMessagesFromFile as readClaudeMessagesFromFile,
+} from "./claude"
+import {
+  getDefaultProjectsDir as getCursorProjectsDir,
+  readSessionFromFile as readCursorSessionFromFile,
+  readMessagesFromFile as readCursorMessagesFromFile,
+} from "./cursor"
+import {
   readConfig,
   writeConfig,
   writeGlobalConfig,
@@ -97,18 +112,19 @@ async function askRequired(query: string, label: string): Promise<string> {
 const HELP = `boons — collaborative session artifact tool
 
 Usage:
-  boons session-save --tool <name> [--session-id <id>] [--summary <text>] [--json]
-                                                      Save session to .boons/
-  boons ls [--branch <name>] [--json]                 List saved sessions
-  boons ls --remote [--branch <name>] [--json]        List remote sessions
-  boons install <tool>                                Install skills globally for a tool (+ global .gitignore)
-  boons install <tool> --project                      Install skills scoped to the project (+ project .gitignore)
-  boons remote                                        Show remote config, or prompt if none
-  boons remote --provider aws|gcp|azure ...           Configure cloud remote
-  boons remote --project --provider aws|gcp|azure ... Configure cloud remote per-project
-  boons push [--session-id <id>] [--branch <b>]       Push sessions to cloud
-  boons pull [--session-id <id>] [--branch <b>]       Pull sessions from cloud
-  boons --help                                        Show this message
+  boons session-read --tool <name> --session-id <id>   Read session messages as text
+  boons session-save --tool <name> --session-id <id> --summary <text> [--file <path>...] [--json]
+                                                        Save session + authored files
+  boons ls [--branch <name>] [--json]                   List saved sessions
+  boons ls --remote [--branch <name>] [--json]          List remote sessions
+  boons install <tool>                                  Install skills globally for a tool (+ global .gitignore)
+  boons install <tool> --project                        Install skills scoped to the project (+ project .gitignore)
+  boons remote                                          Show remote config, or prompt if none
+  boons remote --provider aws|gcp|azure ...             Configure cloud remote
+  boons remote --project --provider aws|gcp|azure ...   Configure cloud remote per-project
+  boons push [--session-id <id>] [--branch <b>]         Push sessions to cloud
+  boons pull [--session-id <id>] [--branch <b>]         Pull sessions from cloud
+  boons --help                                          Show this message
 
 Remote flags:
   --provider aws|gcp|azure  Cloud provider
@@ -119,9 +135,10 @@ Remote flags:
   --prefix <path>           Optional key prefix in bucket
 
 Options:
-  --tool <name>       Tool to export from (opencode | claude-code | cursor)
-  --summary <text>    Session summary (required for export)
-  --session-id <id>   Session to export/push/pull (default: auto-detect / all)
+  --tool <name>       Tool to read from (opencode | claude-code | cursor)
+  --summary <text>    Session summary (required for session-save)
+  --session-id <id>   Session to read/save/push/pull (required for session-read, auto-detect for others)
+  --file <path>       File to include in session directory (repeatable, for session-save)
   --branch <name>     Filter by branch (default: current branch)
   --json              Output as JSON (for tool integration)
 
@@ -136,7 +153,7 @@ Environment:
   BOONS_CURSOR_DIR    Cursor projects directory (default: ~/.cursor/projects)
 `
 
-async function cmdSessionSave(args: Record<string, string>) {
+async function cmdSessionSave(args: Record<string, string>, extraFiles: string[] = []) {
   const tool = args["--tool"]
   if (!tool || !isKnownTool(tool)) {
     console.error("--tool is required. Valid tools: " + validTools().join(" | "))
@@ -154,10 +171,78 @@ async function cmdSessionSave(args: Record<string, string>) {
 
   const result = await exportSession({ tool, sessionID, summary })
 
+  for (const filePath of extraFiles) {
+    const basename = path.basename(filePath)
+    await Bun.write(path.join(result.dir, basename), Bun.file(filePath))
+    if (!asJson) console.log(`  wrote ${basename}`)
+  }
+
   if (asJson) {
     console.log(JSON.stringify(result))
   } else {
     console.log(`Saved ${result.messageCount} messages to ${result.dir}`)
+  }
+}
+
+async function cmdSessionRead(args: Record<string, string>) {
+  const tool = args["--tool"]
+  if (!tool || !isKnownTool(tool)) {
+    console.error("--tool is required. Valid tools: " + validTools().join(" | "))
+    process.exit(1)
+  }
+
+  const sessionID = args["--session-id"]
+  if (!sessionID) {
+    console.error("--session-id is required.")
+    process.exit(1)
+  }
+
+  const cwd = process.cwd()
+
+  let sessionInfo: import("./opencode").SessionInfo
+  let messages: import("./opencode").MessageEntry[]
+
+  if (tool === "opencode") {
+    const dbPath = getDefaultDBPath()
+    sessionInfo = readSessionFromDB(dbPath, sessionID)
+    messages = readMessagesFromDB(dbPath, sessionID)
+  } else if (tool === "claude-code") {
+    const projectsDir = getClaudeProjectsDir()
+    sessionInfo = readClaudeSessionFromFile(projectsDir, cwd, sessionID)
+    messages = readClaudeMessagesFromFile(projectsDir, cwd, sessionID)
+  } else {
+    const projectsDir = getCursorProjectsDir()
+    sessionInfo = readCursorSessionFromFile(projectsDir, cwd, sessionID)
+    messages = readCursorMessagesFromFile(projectsDir, cwd, sessionID)
+  }
+
+  const created = sessionInfo.time.created
+    ? new Date(sessionInfo.time.created).toISOString()
+    : "unknown"
+  const updated = sessionInfo.time.updated
+    ? new Date(sessionInfo.time.updated).toISOString()
+    : "unknown"
+
+  console.log(`Session: ${sessionID}`)
+  console.log(`Title: ${sessionInfo.title}`)
+  console.log(`Tool: ${tool}`)
+  console.log(`Created: ${created}`)
+  console.log(`Updated: ${updated}`)
+  console.log(`Messages: ${messages.length}`)
+  console.log("")
+
+  for (const m of messages) {
+    const role = (m.info as Record<string, unknown>).role ?? "unknown"
+    const ts = (m.info as Record<string, unknown>).timestamp
+      ? new Date((m.info as Record<string, unknown>).timestamp as number).toISOString()
+      : null
+    const header = ts ? `[${role}] (${ts}):` : `[${role}]:`
+    console.log(header)
+    for (const part of m.parts) {
+      const text = part.text ?? part.content ?? ""
+      if (text) console.log(text)
+    }
+    console.log("")
   }
 }
 
@@ -535,6 +620,7 @@ Each export creates a session directory containing:
 - \`raw.jsonl\` — the complete message history in native format
 - \`info.json\` — metadata (session name, author, branch, participants, timestamps)
 - \`summary.md\` — a summary you auto-generate when saving
+- Any other files you include via \`--file\` (plan.md, decisions.md, etc.)
 
 ## When to use this — be proactive
 
@@ -574,15 +660,20 @@ Before saving, check the current branch with \`git rev-parse --abbrev-ref HEAD\`
 ${initSection}
 ## Using the command
 
-1. Compose a concise summary of what was accomplished, key decisions made,
-   and what remains uncertain
-2. Run \`boons session-save --tool ${t.flag} --summary "<summary>" --session-id <id>\`
-   ${t.extraSave ? t.extraSave.trim() : "Use \`--session-id\` to target a specific session, or omit to auto-detect the most recent one"}
-3. After the command succeeds, read \`raw.jsonl\` in the created session
-   directory and refine \`summary.md\` with any important details you missed.
-   Your initial summary is written from memory; the session log gives you
-   a second pass to catch specifics about files changed, error messages,
-   design rationale, and more.
+1. Run \`boons session-read --tool ${t.flag} --session-id <id>\` to review the
+   actual conversation before writing anything
+2. Based on what you read, compose a thorough summary and any additional
+   docs (plan.md, decisions.md, etc.) — write them as local files, or
+   reference existing files the user has already authored
+
+   Keep your summary **concise** — it's the primary way sessions are
+   discovered later. Focus on: what was accomplished, key decisions,
+   files changed, and what's still open or uncertain. Future agents
+   read this summary first to decide if the full session is relevant.
+3. Run \`boons session-save --tool ${t.flag} --session-id <id> --summary "<summary>" \\
+      --file /path/to/summary.md [--file /path/to/plan.md]\`
+   Use \`--file\` for each authored file to copy into the session directory
+   alongside the auto-generated export (raw.jsonl, info.json, summary.md from --summary)
 
 You may also optionally create:
 
@@ -646,10 +737,12 @@ When the user switches to or creates a branch, proactively check for
 existing context:
 
 1. Run \`boons ls [--branch <name>]\` to discover saved sessions
-2. If sessions exist, read the most recent \`summary.md\`
+2. Read \`summary.md\` from **every session** on the branch to
+   understand the full narrative arc — skim all summaries, then
+   decide which sessions need a deeper look via \`raw.jsonl\`
 3. Also read \`plan.md\` and \`decisions.md\` if present
-4. Orient the user: "The last session was working on X. Key decisions
-   so far: Y. Still open or uncertain: Z."
+4. Orient the user: "Sessions on this branch worked on X, Y, Z.
+   Key decisions so far: A. Still open or uncertain: B."
 5. If the new branch has no sessions, check for sessions on the branch
    you came from or on \`main\`/\`master\`. Run \`boons ls --branch <name>\`
    to discover relevant context.
@@ -661,9 +754,10 @@ where things stand.
 
 When the user begins describing a new task or feature to work on:
 
-1. Check for context with \`boons ls\` on the current branch
-2. Read the latest \`summary.md\` (and \`plan.md\`/\`decisions.md\`
-   if present)
+1. Run \`boons ls\` to see all sessions on the current branch
+2. Read \`summary.md\` from every session — don't assume the most
+   recent session covers it. Skim all summaries to find context
+   relevant to the new task.
 3. Use that context to ground your response — don't act like a blank
    slate. Reference prior decisions and open questions so the work
    feels continuous.
@@ -691,6 +785,17 @@ When asked to review a branch or understand someone else's work:
    \`decisions.md\`
 4. Generate a synthesis: overall purpose, what was built, design
    decisions with rationale, open questions
+
+### Finding specific context
+
+When the user asks about a specific feature, bug, or decision:
+
+1. Run \`boons ls\` on the current branch
+2. Skim \`summary.md\` from all sessions — look for keywords
+   matching the topic
+3. If no match found, search other branches with
+   \`boons ls --branch <name>\` and skim their summaries
+4. For promising sessions, read \`raw.jsonl\` for full detail
 
 If \`summary.md\` files are sparse and \`raw.jsonl\` exists, you may
 read the raw logs directly to fill in gaps — but prefer summaries
@@ -914,14 +1019,20 @@ async function cmdPull(args: Record<string, string>) {
   }
 }
 
-function parseArgs(args: string[]): Record<string, string> {
-  const opts: Record<string, string> = {}
+function parseArgs(args: string[]): Record<string, string | string[]> {
+  const opts: Record<string, string | string[]> = {}
+  const repeatable = new Set(["--file"])
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
     if (a.startsWith("--")) {
       const val = args[i + 1]
       if (val !== undefined && !val.startsWith("--")) {
-        opts[a] = val
+        if (repeatable.has(a)) {
+          if (!opts[a]) opts[a] = []
+          ;(opts[a] as string[]).push(val)
+        } else {
+          opts[a] = val
+        }
         i++
       } else {
         opts[a] = "true"
@@ -944,9 +1055,14 @@ async function main() {
   const cmd = args[0]
   const opts = parseArgs(args.slice(1))
 
+  const extraFiles = Array.isArray(opts["--file"]) ? opts["--file"] as string[] : opts["--file"] ? [opts["--file"] as string] : []
+
   switch (cmd) {
+    case "session-read":
+      await cmdSessionRead(opts as Record<string, string>)
+      break
     case "session-save":
-      await cmdSessionSave(opts)
+      await cmdSessionSave(opts as Record<string, string>, extraFiles)
       break
     case "ls":
       await cmdLs(opts)

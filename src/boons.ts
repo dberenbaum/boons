@@ -400,9 +400,18 @@ async function cmdLsRemote(args: Record<string, string>) {
   }
 }
 
+function getGlobalGitignorePath(): string {
+  try {
+    const buf = Bun.spawnSync(["git", "config", "--global", "core.excludesfile"])
+    const resolved = buf.stdout.toString().trim()
+    if (resolved) return resolved
+  } catch {}
+  return path.join(os.homedir(), ".config", "git", "ignore")
+}
+
 function addBoonsToGitignore(scope: "global" | "project") {
   const gitignorePath = scope === "global"
-    ? path.join(os.homedir(), ".config", "git", "ignore")
+    ? getGlobalGitignorePath()
     : path.join(process.cwd(), ".gitignore")
 
   const gitignoreContent = (() => {

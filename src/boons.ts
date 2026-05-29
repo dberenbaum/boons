@@ -655,12 +655,9 @@ const tools: Record<string, ToolInfo> = {
 }
 
 function saveSkillContent(t: ToolInfo): string {
-  const onlyUse = `
-Only use in projects with a \`.boons/\` directory.
-`
   return `---
 name: ${t.name}-save
-description: Auto-save at natural stopping points: before commits, before branch switches, every ~15 messages, or when user is satisfied. Do NOT ask. Only relevant in projects with a .boons/ directory.
+description: Auto-save at natural stopping points: before commits, before branch switches, every ~15 messages, or when user is satisfied. Do NOT ask.
 ---
 
 ## What this does
@@ -692,7 +689,7 @@ Run \`boons session-save --tool ${t.flag} --summary "..."\` **automatically**
 
 Do NOT auto-save on trivial exchanges (single-line suggestions, yes/no
 answers, README-only typos). Use judgment.
-${onlyUse}
+
 After saving, optionally ask: "Want me to push this to the team so they
 can see the context?" — this turns auto-save into a natural prompt for
 sharing without being automatic.
@@ -741,12 +738,9 @@ for all artifacts related to a session.
 }
 
 function loadSkillContent(t: ToolInfo): string {
-  const onlyUse = `
-Only use in projects with a \`.boons/\` directory.
-`
   return `---
 name: ${t.name}-load
-description: Load prior context on branch switch, before new features, or when drafting PRs. Read .boons/ session summaries. Only relevant in projects with a .boons/ directory.
+description: Load prior context on branch switch, before new features, or when drafting PRs. Read .boons/ session summaries.
 ---
 
 ## What this does
@@ -770,7 +764,7 @@ Sessions may also have additional files generated after export:
 - Any other docs the author created
 
 To see which files are present for a particular session, list its directory.
-${onlyUse}
+
 ## Protocols
 
 ### On branch checkout or creation
@@ -846,10 +840,9 @@ as the starting point.
 }
 
 function pushSkillContent(t: ToolInfo): string {
-  const onlyUse = `Only use in projects with a \`.boons/\` directory. `
   return `---
 name: ${t.name}-push
-description: Ask to share after auto-save, before git push, or before PR review. Push .boons/ to cloud. Always ask user. Only relevant in projects with a .boons/ directory.
+description: Ask to share after auto-save, before git push, or before PR review. Push .boons/ to cloud. Always ask user.
 ---
 
 ## What this does
@@ -866,7 +859,7 @@ Run \`boons push\` when:
 - Before pushing to the remote repository — ask the user
 - Before creating or marking a PR as ready for review — ask the user
 
-${onlyUse}**Always ask the user before running** — this shares session data with others.
+**Always ask the user before running** — this shares session data with others.
 ## Before first push
 
 Object versioning on your cloud bucket is **recommended** — it gives you
@@ -889,12 +882,9 @@ whatever is in the local session directory.
 }
 
 function pullSkillContent(t: ToolInfo): string {
-  const onlyUse = `
-Only use in projects with a \`.boons/\` directory.
-`
   return `---
 name: ${t.name}-pull
-description: Fetch remote context after git pull or before code review. Pull .boons/ from cloud. Only relevant in projects with a .boons/ directory.
+description: Fetch remote context after git pull or before code review. Pull .boons/ from cloud.
 ---
 
 ## What this does
@@ -909,7 +899,7 @@ Run \`boons pull\` when:
 - The user explicitly asks to fetch remote sessions
 - After pulling from the remote repository — suggest it
 - Before reviewing work on a branch — suggest fetching context from collaborators
-${onlyUse}
+
 ## Workflow
 
 1. First run \`boons ls --remote\` to see what sessions exist for the

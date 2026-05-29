@@ -6,6 +6,7 @@ describe("isKnownTool", () => {
     expect(isKnownTool("opencode")).toBe(true)
     expect(isKnownTool("claude-code")).toBe(true)
     expect(isKnownTool("cursor")).toBe(true)
+    expect(isKnownTool("codex")).toBe(true)
   })
 
   test("returns false for unknown tools", () => {
@@ -18,6 +19,6 @@ describe("isKnownTool", () => {
 describe("validTools", () => {
   test("returns all known tools", () => {
     const tools = validTools()
-    expect(tools).toEqual(["opencode", "claude-code", "cursor"])
+    expect(tools).toEqual(["opencode", "claude-code", "cursor", "codex"])
   })
 })

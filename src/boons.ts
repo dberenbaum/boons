@@ -20,6 +20,11 @@ import {
   readMessagesFromFile as readCursorMessagesFromFile,
 } from "./cursor"
 import {
+  getDefaultCodexDir,
+  readSessionFromFile as readCodexSessionFromFile,
+  readMessagesFromFile as readCodexMessagesFromFile,
+} from "./codex"
+import {
   readConfig,
   writeConfig,
   writeGlobalConfig,
@@ -135,7 +140,7 @@ Remote flags:
   --prefix <path>           Optional key prefix in bucket
 
 Options:
-  --tool <name>       Tool to read from (opencode | claude-code | cursor)
+  --tool <name>       Tool to read from (opencode | claude-code | cursor | codex)
   --summary <text>    Session summary (required for session-save)
   --session-id <id>   Session to read/save/push/pull (required for session-read, auto-detect for others)
   --file <path>       File to include in session directory (repeatable, for session-save)
@@ -144,14 +149,16 @@ Options:
   --json              Output as JSON (for tool integration)
 
 Tools:
-  opencode       OpenAI Codex CLI plugin
+  opencode       OpenCode skills
   claude-code    Anthropic Claude Code skills
   cursor         Cursor MDC rules
+  codex          OpenAI Codex skills
 
 Environment:
   BOONS_OPENCODE_DIR  OpenCode data directory (default: $XDG_DATA_HOME/opencode or ~/.local/share/opencode)
   BOONS_CLAUDE_DIR    Claude Code projects directory (default: ~/.claude/projects)
   BOONS_CURSOR_DIR    Cursor projects directory (default: ~/.cursor/projects)
+  BOONS_CODEX_DIR     Codex home directory (default: $CODEX_HOME or ~/.codex)
 `
 
 async function cmdSessionSave(args: Record<string, string>, extraFiles: string[] = []) {
@@ -211,10 +218,14 @@ async function cmdSessionRead(args: Record<string, string>) {
     const projectsDir = getClaudeProjectsDir()
     sessionInfo = readClaudeSessionFromFile(projectsDir, cwd, sessionID)
     messages = readClaudeMessagesFromFile(projectsDir, cwd, sessionID)
-  } else {
+  } else if (tool === "cursor") {
     const projectsDir = getCursorProjectsDir()
     sessionInfo = readCursorSessionFromFile(projectsDir, cwd, sessionID)
     messages = readCursorMessagesFromFile(projectsDir, cwd, sessionID)
+  } else {
+    const codexDir = getDefaultCodexDir()
+    sessionInfo = readCodexSessionFromFile(codexDir, sessionID)
+    messages = readCodexMessagesFromFile(codexDir, sessionID)
   }
 
   const created = sessionInfo.time.created
@@ -507,6 +518,8 @@ async function cmdInstall(tool: string, args: Record<string, string>) {
     await installClaudeCode(projectDir)
   } else if (tool === "cursor") {
     await installCursor(projectDir)
+  } else if (tool === "codex") {
+    await installCodex(projectDir)
   }
 
   const info = tools[tool]
@@ -558,6 +571,11 @@ function addRulesPointer(filePath: string) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true })
   fs.writeFileSync(filePath, updated)
   console.log(`Added boons rule to ${path.basename(filePath)}`)
+
+  const overridePath = path.join(path.dirname(filePath), "AGENTS.override.md")
+  if (path.basename(filePath) === "AGENTS.md" && fs.existsSync(overridePath)) {
+    console.log(`Note: ${overridePath} exists and may override AGENTS.md guidance for Codex.`)
+  }
 }
 
 function ensureBoonsOnPath() {
@@ -651,6 +669,16 @@ const tools: Record<string, ToolInfo> = {
    or command substitution (\`\$(cat <<EOF...EOF)\`), which hang in non-interactive shells.`,
     projectRulesFile: ".cursorrules",
     globalRulesFile: "",
+  },
+  codex: {
+    flag: "codex",
+    label: "Codex",
+    name: "session",
+    globalDir: path.join(os.homedir(), ".agents", "skills"),
+    projectDir: ".agents/skills",
+    extraSave: "",
+    projectRulesFile: "AGENTS.md",
+    globalRulesFile: ".codex/AGENTS.md",
   },
 }
 
@@ -953,6 +981,14 @@ async function installCursor(projectDir?: string) {
     ? path.join(projectDir, tools.cursor.projectDir)
     : tools.cursor.globalDir
   await writeSkills(tools.cursor, root)
+  ensureBoonsOnPath()
+}
+
+async function installCodex(projectDir?: string) {
+  const root = projectDir
+    ? path.join(projectDir, tools.codex.projectDir)
+    : tools.codex.globalDir
+  await writeSkills(tools.codex, root)
   ensureBoonsOnPath()
 }
 

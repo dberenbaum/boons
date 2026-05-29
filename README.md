@@ -73,6 +73,7 @@ Sessions are scoped to branches. When you push code to a shared remote, you can 
 boons install opencode    # OpenCode tools + skills
 boons install claude-code # Claude Code plugin + skills
 boons install cursor      # Cursor .mdc rules
+boons install codex       # Codex AGENTS.md + skills
 ```
 
 Each install command writes the agent skills and tool definitions that enable auto-save.
@@ -112,6 +113,7 @@ reproducing past states to finding and using relevant historical context.
 | Open Code | Native plugin: custom tools + skills in `~/.config/opencode/` | `opencode.db` (SQLite) |
 | Claude Code | Plugin: 4 SKILL.md files in `~/.claude/plugins/boons/` | JSONL under `~/.claude/projects/` |
 | Cursor | `.mdc` rules in `~/.cursor/rules/` | Agent-transcript JSONL + SQLite metadata |
+| Codex | `AGENTS.md` rules + skills in `.agents/skills` or `~/.agents/skills` | JSONL under `~/.codex/sessions/` |
 
 ## Configuration
 

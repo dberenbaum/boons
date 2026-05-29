@@ -20,9 +20,16 @@ import {
   readRawContent as readCursorRawContent,
   discoverSessions as discoverCursorSessions,
 } from "./cursor"
+import {
+  getDefaultCodexDir,
+  readSessionFromFile as readCodexSessionFromFile,
+  readMessagesFromFile as readCodexMessagesFromFile,
+  readRawContent as readCodexRawContent,
+  discoverSessions as discoverCodexSessions,
+} from "./codex"
 import { getBranch, getAuthor } from "./git"
 
-const knownTools = ["opencode", "claude-code", "cursor"] as const
+const knownTools = ["opencode", "claude-code", "cursor", "codex"] as const
 export type Tool = (typeof knownTools)[number]
 
 export function isKnownTool(s: string): s is Tool {
@@ -70,11 +77,19 @@ export async function exportSession(opts: ExportOptions): Promise<ExportResult> 
       getBranch(cwd),
       getAuthor(cwd),
     ])
-  } else {
+  } else if (opts.tool === "cursor") {
     const projectsDir = getCursorProjectsDir()
     ;[sessionInfo, messages, branch, author] = await Promise.all([
       readCursorSessionFromFile(projectsDir, cwd, sessionID),
       readCursorMessagesFromFile(projectsDir, cwd, sessionID),
+      getBranch(cwd),
+      getAuthor(cwd),
+    ])
+  } else {
+    const codexDir = getDefaultCodexDir()
+    ;[sessionInfo, messages, branch, author] = await Promise.all([
+      readCodexSessionFromFile(codexDir, sessionID),
+      readCodexMessagesFromFile(codexDir, sessionID),
       getBranch(cwd),
       getAuthor(cwd),
     ])
@@ -88,6 +103,9 @@ export async function exportSession(opts: ExportOptions): Promise<ExportResult> 
     await Bun.write(path.join(sessionDir, "raw.jsonl"), rawContent)
   } else if (opts.tool === "cursor") {
     const rawContent = readCursorRawContent(getCursorProjectsDir(), cwd, sessionID)
+    await Bun.write(path.join(sessionDir, "raw.jsonl"), rawContent)
+  } else if (opts.tool === "codex") {
+    const rawContent = readCodexRawContent(getDefaultCodexDir(), sessionID)
     await Bun.write(path.join(sessionDir, "raw.jsonl"), rawContent)
   } else {
     const jsonl = messages.map((m) => JSON.stringify(m)).join("\n")
@@ -131,8 +149,10 @@ function resolveSessionID(tool: Tool, cwd: string): string {
     sessions = discoverOpenCodeSessions(getOpenCodeDBPath(), cwd)
   } else if (tool === "claude-code") {
     sessions = discoverClaudeSessions(getDefaultProjectsDir(), cwd)
-  } else {
+  } else if (tool === "cursor") {
     sessions = discoverCursorSessions(getCursorProjectsDir(), cwd)
+  } else {
+    sessions = discoverCodexSessions(getDefaultCodexDir(), cwd)
   }
 
   if (sessions.length === 0) {

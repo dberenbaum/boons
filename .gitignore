@@ -1,3 +1,4 @@
 node_modules/
 .boons/
+.opencode/
 !.boons/config.json

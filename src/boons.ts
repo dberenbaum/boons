@@ -2,6 +2,7 @@ import * as path from "path"
 import * as fs from "fs"
 import * as os from "os"
 import * as readline from "node:readline"
+import { createHash } from "node:crypto"
 import { Glob } from "bun"
 import { exportSession, isKnownTool, validTools } from "./export"
 import {
@@ -129,6 +130,14 @@ Usage:
   boons remote --project --provider aws|gcp|azure ...   Configure cloud remote per-project
   boons push [--session-id <id>] [--branch <b>]         Push sessions to cloud
   boons pull [--session-id <id>] [--branch <b>]         Pull sessions from cloud
+  boons sync ls --from <tool> [--project] [--json]              List skills & rules from a tool
+  boons sync ls --all [--project] [--json]                     List skills & rules across all tools
+  boons sync read --from <tool> [--project] [--json]           Read skills & rules from a tool
+  boons sync read --all [--project] [--json]                   Read skills & rules across all tools
+    [--skill <name>...] [--rules]                               Filter to specific items
+  boons sync write --to <tool> [--project] [--dry-run] [--force] [--json]
+    --skill <name>=<path> [--skill <name>=<path> ...]           Write transformed skills to a tool
+    --rules <path>                                               Write rules file
   boons --help                                          Show this message
 
 Remote flags:
@@ -144,6 +153,13 @@ Options:
   --summary <text>    Session summary (required for session-save)
   --session-id <id>   Session to read/save/push/pull (required for session-read, auto-detect for others)
   --file <path>       File to include in session directory (repeatable, for session-save)
+  --skill <name>      Skill name (for sync read/ls) or name=path (for sync write, repeatable)
+  --rules             Include rules (for sync read/ls) or path (for sync write)
+  --all               Scan all tools (for sync read/ls, replaces --from)
+  --from <tool>       Source tool (for sync read/ls)
+  --to <tool>         Destination tool (for sync write)
+  --dry-run           Preview changes without writing (for sync write)
+  --force             Skip confirmation prompts (for sync write)
   --branch <name>     Filter by branch (default: current branch)
   --global            Install globally (default; use --project for project-scoped)
   --json              Output as JSON (for tool integration)
@@ -541,7 +557,7 @@ async function cmdInstall(tool: string, args: Record<string, string>) {
       console.log("messages — load the session-save skill and follow its guidance.")
       console.log("")
       console.log("Also available: session-load (prior context), session-push (share")
-      console.log("to cloud), session-pull (fetch from cloud).")
+      console.log("to cloud), session-pull (fetch from cloud), sync (cross-tool sync).")
     }
   }
 }
@@ -554,7 +570,7 @@ function addRulesPointer(filePath: string) {
     "messages — load the session-save skill and follow its guidance.",
     "",
     "Also available: session-load (prior context), session-push (share",
-    "to cloud), session-pull (fetch from cloud).",
+    "to cloud), session-pull (fetch from cloud), sync (cross-tool sync).",
     "",
   ].join("\n")
 
@@ -943,12 +959,161 @@ Run \`boons pull\` when:
 `
 }
 
+function syncSkillContent(t: ToolInfo): string {
+  return `---
+name: ${t.name}-sync
+description: Sync skills and rules between AI coding tools (OpenCode, Claude Code, Cursor, Codex). Use when migrating or setting up a new tool.
+---
+
+## What this does
+
+Boons sync copies skills and rules from one AI coding tool to another.
+You (the agent) do the content transformation — boons handles the I/O.
+
+The workflow:
+
+1. **Survey** — \`boons sync ls --from <source>\` lists what's available
+2. **Fetch** — \`boons sync read --from <source> [--skill <name>...] [--rules]\`
+   reads the raw content with fingerprints (sha256 hashes) for change detection
+3. **Transform** — you rewrite tool-specific references, re-structure rules, etc.
+4. **Write** — \`boons sync write --to <dest> --skill <name>=<path> [--rules <path>]\`
+   writes the transformed files with dry-run preview and content comparison
+
+## When to use this
+
+Run \`boons sync\` when:
+
+- The user says "migrate my X config to Y" or "set up Y like X"
+- A new tool was installed and needs skills/rules imported
+- Skills have diverged between tools and need alignment
+- The user explicitly asks to sync
+
+Do NOT run blindly — always present the plan (survey results) and
+optionally use \`--dry-run\` to preview before writing.
+
+## Workflow
+
+### 1. Survey the source
+
+\`\`\`
+boons sync ls --from ${t.flag} [--project] [--json]
+\`\`\`
+
+Lists all skills and rules with their file paths and fingerprints.
+Use \`--all\` to survey every tool at once:
+
+\`\`\`
+boons sync ls --all [--project] [--json]
+\`\`\`
+
+### 2. Fetch content
+
+\`\`\`
+boons sync read --from ${t.flag} [--project] [--json]
+\`\`\`
+
+Reads everything. Use \`--json\` for structured output with
+fingerprints the agent can compare:
+
+\`\`\`
+boons sync read --from ${t.flag} --project --json
+\`\`\`
+
+To fetch only a specific skill or just the rules:
+
+\`\`\`
+boons sync read --from ${t.flag} --project --skill session-save --json
+boons sync read --from ${t.flag} --project --rules --json
+\`\`\`
+
+### 3. Transform (you do this)
+
+Rewrite tool-specific references in the fetched content:
+
+- Tool flags (\`--tool opencode\` → \`--tool ${t.flag}\`)
+- Rules filenames (\`AGENTS.md\` → \`CLAUDE.md\`)
+- Skill name prefixes (\`session-save\` vs \`boons-session-save\`)
+- Directory paths and any other tool-specific language
+
+Save the transformed content to temporary files (e.g. in
+\`.boons/.state/sync/output/\`) so the write command can read them.
+
+### 4. Write
+
+First preview with \`--dry-run\`:
+
+\`\`\`
+boons sync write --to ${t.flag} --project --dry-run --json \\
+  --skill session-save=.boons/.state/sync/output/session-save.md \\
+  --rules .boons/.state/sync/output/rules.md
+\`\`\`
+
+Then apply (omit \`--dry-run\`):
+
+\`\`\`
+boons sync write --to ${t.flag} --project \\
+  --skill session-save=.boons/.state/sync/output/session-save.md \\
+  --rules .boons/.state/sync/output/rules.md
+\`\`\`
+
+For multiple skills, repeat \`--skill\`:
+
+\`\`\`
+boons sync write --to ${t.flag} --project \\
+  --skill session-save=file1.md \\
+  --skill session-load=file2.md \\
+  --rules rules.md
+\`\`\`
+
+## Per-tool defaults
+
+When writing, boons uses the tool's standard paths:
+
+| Tool | Skill dir (project) | Rules file (project) |
+|---|---|---|
+| opencode | \`.opencode/skills/\` | \`AGENTS.md\` |
+| claude-code | \`.claude/skills/\` | \`CLAUDE.md\` |
+| cursor | \`.cursor/skills/\` | \`.cursorrules\` |
+| codex | \`.agents/skills/\` | \`AGENTS.md\` |
+
+Omit \`--project\` for global scope (home directory).
+
+## Example scenario
+
+User: "I want the same setup in ${t.label} that I have in opencode."
+
+1. Survey the source:
+   \`\`\`
+   boons sync ls --from opencode --project
+   \`\`\`
+
+2. Fetch content:
+   \`\`\`
+   boons sync read --from opencode --project --json
+   \`\`\`
+
+3. Transform the JSON content: rewrite opencode references to ${t.flag}
+   references, save to temp files
+
+4. Preview and apply:
+   \`\`\`
+   boons sync write --to ${t.flag} --project --dry-run --json \\
+     --skill session-save=output/session-save.md \\
+     --rules output/rules.md
+   boons sync write --to ${t.flag} --project \\
+     --skill session-save=output/session-save.md \\
+     --rules output/rules.md
+   \`\`\`
+`
+}
+
 async function writeSkills(t: ToolInfo, rootDir: string) {
   const skills = [
     { name: "session-save", content: saveSkillContent(t) },
     { name: "session-load", content: loadSkillContent(t) },
     { name: "session-push", content: pushSkillContent(t) },
     { name: "session-pull", content: pullSkillContent(t) },
+    { name: "sync", content: syncSkillContent(t) },
   ]
 
   for (const skill of skills) {
@@ -1068,9 +1233,307 @@ async function cmdPull(args: Record<string, string>) {
   }
 }
 
+interface SyncFile {
+  type: "skill" | "rules"
+  name?: string
+  path: string
+  fingerprint: string
+  content?: string
+}
+
+type WriteStatus = "written" | "up-to-date" | "would-write"
+
+interface WriteResult {
+  type: "skill" | "rules"
+  name?: string
+  path: string
+  status: WriteStatus
+}
+
+function syncFingerprint(content: string): string {
+  return createHash("sha256").update(content).digest("hex")
+}
+
+function syncWriteFile(destPath: string, content: string, dryRun: boolean): WriteStatus {
+  const existing = fs.existsSync(destPath) ? fs.readFileSync(destPath, "utf-8") : null
+  if (existing === content) return "up-to-date"
+  if (dryRun) return "would-write"
+
+  fs.mkdirSync(path.dirname(destPath), { recursive: true })
+  fs.writeFileSync(destPath, content)
+  console.log(`  wrote ${destPath}`)
+  return "written"
+}
+
+async function collectSyncFiles(
+  tool: string,
+  isProject: boolean,
+): Promise<{ tool: string; scope: string; files: SyncFile[] }> {
+  const info = tools[tool]
+  const skillDir = isProject
+    ? path.join(process.cwd(), info.projectDir)
+    : info.globalDir
+  const rulesPath = isProject
+    ? path.join(process.cwd(), info.projectRulesFile)
+    : info.globalRulesFile
+      ? path.join(os.homedir(), info.globalRulesFile)
+      : null
+
+  const files: SyncFile[] = []
+
+  if (fs.existsSync(skillDir)) {
+    const entries = fs.readdirSync(skillDir, { recursive: true })
+    for (const entry of entries) {
+      const fullPath = path.join(skillDir, entry)
+      if (!fs.statSync(fullPath).isFile()) continue
+      const content = fs.readFileSync(fullPath, "utf-8")
+      const sep = entry.includes("/") ? entry.split("/")[0] : path.basename(entry, ".md")
+      const relativeRoot = isProject ? process.cwd() : os.homedir()
+      files.push({
+        type: "skill",
+        name: sep,
+        path: path.relative(relativeRoot, fullPath),
+        fingerprint: syncFingerprint(content),
+      })
+    }
+  }
+
+  if (rulesPath && fs.existsSync(rulesPath)) {
+    const content = fs.readFileSync(rulesPath, "utf-8")
+    const relativeRoot = isProject ? process.cwd() : os.homedir()
+    files.push({
+      type: "rules",
+      path: path.relative(relativeRoot, rulesPath),
+      fingerprint: syncFingerprint(content),
+    })
+  }
+
+  return { tool, scope: isProject ? "project" : "global", files }
+}
+
+async function cmdSyncLs(args: Record<string, string>, allTools: boolean) {
+  const tool = args["--from"]
+  if (!allTools && (!tool || !isKnownTool(tool))) {
+    console.error("--from is required. Valid tools: " + validTools().join(", "))
+    process.exit(1)
+  }
+
+  const isProject = args["--project"] === "true"
+  const asJson = args["--json"] === "true"
+
+  const toolsToScan = allTools ? validTools() : [tool]
+  const results = await Promise.all(toolsToScan.map(t => collectSyncFiles(t, isProject)))
+
+  if (asJson) {
+    console.log(JSON.stringify(allTools ? results : results[0], null, 2))
+    return
+  }
+
+  const empty = results.every(r => r.files.length === 0)
+  if (empty) {
+    console.log("No skills or rules found.")
+    return
+  }
+
+  for (const result of results) {
+    if (result.files.length === 0) continue
+    const header = allTools ? `\n─── Tool: ${result.tool} ${"─".repeat(Math.max(0, 60 - result.tool.length - 7))}` : ""
+    if (header) console.log(header)
+
+    const table: string[][] = [["Type", "Name", "Path", "Fingerprint"]]
+    const widths = [4, 4, 4, 11]
+
+    for (const f of result.files) {
+      const row = [f.type, f.name ?? "", f.path, f.fingerprint.slice(0, 16)]
+      for (let i = 0; i < row.length; i++) {
+        widths[i] = Math.max(widths[i], row[i].length)
+      }
+      table.push(row)
+    }
+
+    for (const row of table) {
+      console.log(row.map((cell, i) => cell.padEnd(widths[i])).join("  "))
+    }
+  }
+}
+
+async function collectSyncReadFiles(
+  tool: string,
+  isProject: boolean,
+  skillNames: string[],
+  includeRules: boolean,
+): Promise<{ tool: string; scope: string; files: SyncFile[] }> {
+  const info = tools[tool]
+  const skillDir = isProject
+    ? path.join(process.cwd(), info.projectDir)
+    : info.globalDir
+  const rulesPath = isProject
+    ? path.join(process.cwd(), info.projectRulesFile)
+    : info.globalRulesFile
+      ? path.join(os.homedir(), info.globalRulesFile)
+      : null
+
+  const files: SyncFile[] = []
+  const hasSkillFilter = skillNames.length > 0
+  const hasAnyFilter = hasSkillFilter || includeRules
+
+  if (fs.existsSync(skillDir)) {
+    const shouldIncludeSkills = !hasAnyFilter || hasSkillFilter
+    if (shouldIncludeSkills) {
+      const entries = fs.readdirSync(skillDir, { recursive: true })
+      for (const entry of entries) {
+        const fullPath = path.join(skillDir, entry)
+        if (!fs.statSync(fullPath).isFile()) continue
+        const sep = entry.includes("/") ? entry.split("/")[0] : path.basename(entry, ".md")
+        if (hasSkillFilter && !skillNames.includes(sep)) continue
+        const content = fs.readFileSync(fullPath, "utf-8")
+        const relativeRoot = isProject ? process.cwd() : os.homedir()
+        files.push({
+          type: "skill",
+          name: sep,
+          path: path.relative(relativeRoot, fullPath),
+          fingerprint: syncFingerprint(content),
+          content,
+        })
+      }
+    }
+  }
+
+  const shouldIncludeRules = includeRules || !hasAnyFilter
+  if (shouldIncludeRules && rulesPath && fs.existsSync(rulesPath)) {
+    const content = fs.readFileSync(rulesPath, "utf-8")
+    const relativeRoot = isProject ? process.cwd() : os.homedir()
+    files.push({
+      type: "rules",
+      path: path.relative(relativeRoot, rulesPath),
+      fingerprint: syncFingerprint(content),
+      content,
+    })
+  }
+
+  return { tool, scope: isProject ? "project" : "global", files }
+}
+
+async function cmdSyncRead(
+  args: Record<string, string>,
+  skillNames: string[],
+  includeRules: boolean,
+  allTools: boolean,
+) {
+  const tool = args["--from"]
+  if (!allTools && (!tool || !isKnownTool(tool))) {
+    console.error("--from is required. Valid tools: " + validTools().join(", "))
+    process.exit(1)
+  }
+
+  const isProject = args["--project"] === "true"
+  const asJson = args["--json"] === "true"
+
+  const toolsToScan = allTools ? validTools() : [tool]
+  const results = await Promise.all(
+    toolsToScan.map(t => collectSyncReadFiles(t, isProject, skillNames, includeRules)),
+  )
+
+  if (asJson) {
+    console.log(JSON.stringify(allTools ? results : results[0], null, 2))
+    return
+  }
+
+  const empty = results.every(r => r.files.length === 0)
+  if (empty) {
+    console.log("No skills or rules found.")
+    return
+  }
+
+  for (const result of results) {
+    if (result.files.length === 0) continue
+    if (allTools) {
+      console.log(`\n─── Tool: ${result.tool} ${"─".repeat(Math.max(0, 60 - result.tool.length - 7))}`)
+    }
+    for (const f of result.files) {
+      const label = f.type === "rules" ? "Rules" : `Skill: ${f.name}`
+      console.log(`\n─── ${label} ${"─".repeat(Math.max(0, 60 - label.length))}`)
+      console.log(`Path: ${f.path}`)
+      console.log(`Fingerprint: ${f.fingerprint}`)
+      console.log("")
+      console.log(f.content)
+    }
+  }
+}
+
+async function cmdSyncWrite(
+  args: Record<string, string>,
+  skillFiles: string[],
+  rulesFileArg: string | null,
+) {
+  const tool = args["--to"]
+  if (!tool || !isKnownTool(tool)) {
+    console.error("--to is required. Valid tools: " + validTools().join(", "))
+    process.exit(1)
+  }
+
+  const isProject = args["--project"] === "true"
+  const dryRun = args["--dry-run"] === "true"
+  const asJson = args["--json"] === "true"
+
+  const info = tools[tool]
+  const skillDir = isProject
+    ? path.join(process.cwd(), info.projectDir)
+    : info.globalDir
+  const rulesFile = isProject
+    ? path.join(process.cwd(), info.projectRulesFile)
+    : info.globalRulesFile
+      ? path.join(os.homedir(), info.globalRulesFile)
+      : null
+
+  const results: WriteResult[] = []
+
+  for (const arg of skillFiles) {
+    const eqIdx = arg.indexOf("=")
+    if (eqIdx === -1) {
+      console.error(`Invalid --skill format: "${arg}". Use <name>=<path>`)
+      continue
+    }
+    const name = arg.slice(0, eqIdx)
+    const localPath = arg.slice(eqIdx + 1)
+    if (!fs.existsSync(localPath)) {
+      console.error(`File not found: ${localPath}`)
+      continue
+    }
+
+    const content = fs.readFileSync(localPath, "utf-8")
+    const destPath = path.join(skillDir, name, "SKILL.md")
+    const status = syncWriteFile(destPath, content, dryRun)
+    results.push({ type: "skill", name, path: destPath, status })
+  }
+
+  if (rulesFileArg) {
+    if (!rulesFile) {
+      if (!asJson) {
+        console.log("Cursor stores global rules in its internal database.")
+        console.log("Open Settings > Rules > User Rules and paste:")
+        console.log("")
+        console.log(fs.readFileSync(rulesFileArg, "utf-8"))
+      }
+    } else {
+      if (!fs.existsSync(rulesFileArg)) {
+        console.error(`File not found: ${rulesFileArg}`)
+      } else {
+        const content = fs.readFileSync(rulesFileArg, "utf-8")
+        const status = syncWriteFile(rulesFile, content, dryRun)
+        results.push({ type: "rules", path: rulesFile, status })
+      }
+    }
+  }
+
+  if (asJson) {
+    console.log(JSON.stringify(results, null, 2))
+  }
+}
+
 function parseArgs(args: string[]): Record<string, string | string[]> {
   const opts: Record<string, string | string[]> = {}
-  const repeatable = new Set(["--file"])
+  const repeatable = new Set(["--file", "--skill"])
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
     if (a.startsWith("--")) {
@@ -1132,6 +1595,32 @@ async function main() {
       break
     case "pull":
       await cmdPull(opts)
+      break
+    case "sync":
+      const syncSub = args.slice(1).find(a => !a.startsWith("-"))
+      const allTools = (opts["--all"] as string) === "true"
+      if (!syncSub || syncSub === "read") {
+        const skillNames = Array.isArray(opts["--skill"])
+          ? opts["--skill"] as string[]
+          : opts["--skill"]
+            ? [opts["--skill"] as string]
+            : []
+        const includeRules = (opts["--rules"] as string) === "true"
+        await cmdSyncRead(opts as Record<string, string>, skillNames, includeRules, allTools)
+      } else if (syncSub === "ls") {
+        await cmdSyncLs(opts as Record<string, string>, allTools)
+      } else if (syncSub === "write") {
+        const skillFiles = Array.isArray(opts["--skill"])
+          ? opts["--skill"] as string[]
+          : opts["--skill"]
+            ? [opts["--skill"] as string]
+            : []
+        const rulesFileArg = (opts["--rules"] as string) ?? null
+        await cmdSyncWrite(opts as Record<string, string>, skillFiles, rulesFileArg)
+      } else {
+        console.error(`Unknown sync subcommand: "${syncSub}". Use "ls", "read", or "write".`)
+        process.exit(1)
+      }
       break
     default:
       console.error(`Unknown command: ${cmd}`)

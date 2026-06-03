@@ -735,20 +735,25 @@ Before saving, check the current branch with \`git rev-parse --abbrev-ref HEAD\`
   so context is captured on the right branch.
 ## Using the command
 
-1. Run \`boons session-read --tool ${t.flag} --session-id <id>\` to review the
-   actual conversation before writing anything
-2. Based on what you read, compose a thorough summary and any additional
+1. Run \`boons session-read --tool ${t.flag}\` to review the conversation
+   before writing anything — the session ID can be discovered from
+   \`boons ls\` or provided by the user.
+2. Based on your review, compose a thorough summary and any additional
    docs (plan.md, decisions.md, etc.) — write them as local files, or
-   reference existing files the user has already authored
+   reference existing files the user has already authored.
 
    Keep your summary **concise** — it's the primary way sessions are
    discovered later. Focus on: what was accomplished, key decisions,
    files changed, and what's still open or uncertain. Future agents
    read this summary first to decide if the full session is relevant.
-3. Run \`boons session-save --tool ${t.flag} --session-id <id> --summary "<summary>" \\
+3. Run \`boons session-save --tool ${t.flag} --summary "<summary>" \\
       --file /path/to/summary.md [--file /path/to/plan.md]\`
    Use \`--file\` for each authored file to copy into the session directory
-   alongside the auto-generated export (raw.jsonl, info.json, summary.md from --summary)
+   alongside the auto-generated export (raw.jsonl, info.json, summary.md from --summary).
+
+The \`--session-id\` flag is optional — when omitted, boons automatically
+detects the most recent session for the current project. Pass \`--session-id\`
+explicitly to target a different session.
 
 You may also optionally create:
 

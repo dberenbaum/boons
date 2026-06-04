@@ -1,3 +1,6 @@
 node_modules/
 .boons/
 !.boons/config.json
+
+# opencode project skills
+.opencode/node_modules/

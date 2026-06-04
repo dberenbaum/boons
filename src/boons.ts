@@ -538,10 +538,11 @@ async function cmdInstall(tool: string, args: Record<string, string>) {
       console.log("# boons")
       console.log("")
       console.log("Before committing, pushing, or switching branches — and every ~15")
-      console.log("messages — load the session-save skill and follow its guidance.")
+      console.log("messages — load the boons-session-save skill and follow its guidance.")
       console.log("")
-      console.log("Also available: session-load (prior context), session-push (share")
-      console.log("to cloud), session-pull (fetch from cloud).")
+      console.log("Also available: boons-session-load (prior context), boons-session-push (share")
+      console.log("to cloud), boons-session-pull (fetch from cloud), boons-pr-draft (PR")
+      console.log("descriptions), boons-pr-review (PR reviews).")
     }
   }
 }
@@ -551,10 +552,11 @@ function addRulesPointer(filePath: string) {
     "# boons",
     "",
     "Before committing, pushing, or switching branches — and every ~15",
-    "messages — load the session-save skill and follow its guidance.",
+    "messages — load the boons-session-save skill and follow its guidance.",
     "",
-    "Also available: session-load (prior context), session-push (share",
-    "to cloud), session-pull (fetch from cloud).",
+    "Also available: boons-session-load (prior context), boons-session-push (share",
+    "to cloud), boons-session-pull (fetch from cloud), boons-pr-draft (PR",
+    "descriptions), boons-pr-review (PR reviews).",
     "",
   ].join("\n")
 
@@ -684,7 +686,7 @@ const tools: Record<string, ToolInfo> = {
 
 function saveSkillContent(t: ToolInfo): string {
   return `---
-name: ${t.name}-save
+name: boons-session-save
 description: Auto-save at natural stopping points: before commits, before branch switches, every ~15 messages, or when user is satisfied. Do NOT ask.
 ---
 
@@ -772,7 +774,7 @@ for all artifacts related to a session.
 
 function loadSkillContent(t: ToolInfo): string {
   return `---
-name: ${t.name}-load
+name: boons-session-load
 description: Load prior context on branch switch, before new features, or when drafting PRs. Read .boons/ session summaries.
 ---
 
@@ -874,7 +876,7 @@ as the starting point.
 
 function pushSkillContent(t: ToolInfo): string {
   return `---
-name: ${t.name}-push
+name: boons-session-push
 description: Ask to share after auto-save, before git push, or before PR review. Push .boons/ to cloud. Always ask user.
 ---
 
@@ -916,7 +918,7 @@ whatever is in the local session directory.
 
 function pullSkillContent(t: ToolInfo): string {
   return `---
-name: ${t.name}-pull
+name: boons-session-pull
 description: Fetch remote context after git pull or before code review. Pull .boons/ from cloud.
 ---
 
@@ -938,7 +940,7 @@ Run \`boons pull\` when:
 1. First run \`boons ls --remote\` to see what sessions exist for the
    current branch
 2. Then run \`boons pull\` to fetch them into \`.boons/<branch>/\`
-3. After pulling, use the session-load guidance to read them
+3. After pulling, use the boons-session-load guidance to read them
 
 ## Default behavior
 
@@ -948,12 +950,86 @@ Run \`boons pull\` when:
 `
 }
 
+function prDraftSkillContent(t: ToolInfo): string {
+  return `---
+name: boons-pr-draft
+description: When drafting a PR, load boons session context from the branch to ground the description in session history.
+---
+
+## What this does
+
+Guides the agent to use boons session artifacts when drafting a PR,
+so the description reflects the full narrative arc — not just the diff.
+
+## Protocol
+
+When the user asks you to draft a PR, create a PR, or write a PR description:
+
+1. **Discover sessions** — run \`boons ls [--branch <name>]\` for the branch
+   (defaults to current branch)
+2. **Load context** — read \`summary.md\`, \`plan.md\`, and \`decisions.md\` from
+   every session on the branch
+3. **Cross-reference** — identify what was settled, what changed direction
+   midstream, and what's still open
+4. **Draft** — produce a PR description with sections: what changed, why,
+   key decisions with rationale, alternatives considered, open questions
+5. **Present to the user** — do not post the PR automatically. Let the user
+   review and edit the draft.
+
+## Relationship to session-load
+
+This skill activates the "Drafting a PR description" protocol from the
+boons-session-load skill. Refer to boons-session-load for the full
+context-loading workflow.
+`
+}
+
+function prReviewSkillContent(t: ToolInfo): string {
+  return `---
+name: boons-pr-review
+description: When reviewing a PR or branch, load boons context to understand the intent behind changes.
+---
+
+## What this does
+
+Guides the agent to load boons session context before reviewing code,
+so the review evaluates intent vs. execution — not just line-level
+correctness.
+
+## Protocol
+
+When the user asks you to review a PR, review a branch, or understand
+someone else's work:
+
+1. **Fetch context** — if the branch has remote sessions, suggest
+   \`boons pull\` to fetch them first
+2. **Discover sessions** — run \`boons ls [--branch <name>]\` for the branch
+3. **Load context** — read \`summary.md\`, \`plan.md\`, and \`decisions.md\` from
+   every session
+4. **Synthesize** — understand the overall purpose, what was built, design
+   rationale, and open questions
+5. **Review the diff** — examine the actual code changes with that context.
+   Flag places where the implementation diverges from the plan or where
+   intent is unclear
+6. **Present the review to the user** — do not post it automatically via
+   \`gh pr review\`. Let the user decide when and how to share.
+
+## Relationship to session-load
+
+This skill activates the "Reviewing or understanding a branch" protocol
+from the boons-session-load skill. Refer to boons-session-load for the full
+context-loading workflow.
+`
+}
+
 async function writeSkills(t: ToolInfo, rootDir: string) {
   const skills = [
-    { name: "session-save", content: saveSkillContent(t) },
-    { name: "session-load", content: loadSkillContent(t) },
-    { name: "session-push", content: pushSkillContent(t) },
-    { name: "session-pull", content: pullSkillContent(t) },
+    { name: "boons-session-save", content: saveSkillContent(t) },
+    { name: "boons-session-load", content: loadSkillContent(t) },
+    { name: "boons-session-push", content: pushSkillContent(t) },
+    { name: "boons-session-pull", content: pullSkillContent(t) },
+    { name: "boons-pr-draft", content: prDraftSkillContent(t) },
+    { name: "boons-pr-review", content: prReviewSkillContent(t) },
   ]
 
   for (const skill of skills) {

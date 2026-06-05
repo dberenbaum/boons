@@ -133,6 +133,67 @@ function extractTextParts(content: unknown): { type: string; text: string }[] {
   })
 }
 
+function readFirstLine(filePath: string): string | null {
+  try {
+    const fd = fs.openSync(filePath, "r")
+    const buffer = Buffer.alloc(4096)
+    const bytesRead = fs.readSync(fd, buffer, 0, 4096, 0)
+    fs.closeSync(fd)
+    if (bytesRead === 0) return null
+    const content = buffer.toString("utf-8", 0, bytesRead)
+    const newlineIdx = content.indexOf("\n")
+    return newlineIdx >= 0 ? content.slice(0, newlineIdx).trim() : content.trim()
+  } catch {
+    return null
+  }
+}
+
+export function resolveActiveSessionID(codexDir: string, cwd: string): string {
+  const root = sessionsRoot(codexDir)
+
+  if (process.env.CODEX_THREAD_ID) {
+    const envID = process.env.CODEX_THREAD_ID
+    for (const filePath of listJsonlFiles(root)) {
+      const firstLine = readFirstLine(filePath)
+      if (!firstLine) continue
+      try {
+        const entry = JSON.parse(firstLine)
+        if (entry.type === "session_meta" && entry.payload?.id === envID) return envID
+      } catch {}
+    }
+    console.error(`Warning: CODEX_THREAD_ID ${envID} not found in session files`)
+  }
+
+  const files: { path: string; mtime: number }[] = []
+  for (const fp of listJsonlFiles(root)) {
+    try {
+      const stat = fs.statSync(fp)
+      files.push({ path: fp, mtime: stat.mtimeMs })
+    } catch {}
+  }
+  files.sort((a, b) => b.mtime - a.mtime)
+
+  for (const { path: filePath } of files) {
+    const firstLine = readFirstLine(filePath)
+    if (!firstLine) continue
+    try {
+      const entry = JSON.parse(firstLine)
+      if (entry.type === "session_meta" && entry.payload?.cwd === cwd && typeof entry.payload?.id === "string") {
+        return entry.payload.id
+      }
+    } catch {}
+  }
+
+  const sessions = discoverSessions(codexDir, cwd)
+  if (sessions.length === 0) {
+    throw new Error(
+      `No codex sessions found for directory ${cwd}. ` +
+        "Specify --session-id or start a session in this project.",
+    )
+  }
+  return sessions[0].id
+}
+
 export function discoverSessions(codexDir: string, cwd: string): SessionInfo[] {
   return listJsonlFiles(sessionsRoot(codexDir))
     .flatMap(filePath => {

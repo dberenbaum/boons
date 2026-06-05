@@ -5,6 +5,7 @@ import {
   readSessionFromDB,
   readMessagesFromDB,
   discoverSessions as discoverOpenCodeSessions,
+  resolveActiveSessionID,
 } from "./opencode"
 import {
   getDefaultProjectsDir,
@@ -12,6 +13,7 @@ import {
   readMessagesFromFile,
   readRawContent,
   discoverSessions as discoverClaudeSessions,
+  resolveActiveSessionID as resolveClaudeSessionID,
 } from "./claude"
 import {
   getDefaultProjectsDir as getCursorProjectsDir,
@@ -26,6 +28,7 @@ import {
   readMessagesFromFile as readCodexMessagesFromFile,
   readRawContent as readCodexRawContent,
   discoverSessions as discoverCodexSessions,
+  resolveActiveSessionID as resolveCodexSessionID,
 } from "./codex"
 import { getBranch, getAuthor } from "./git"
 
@@ -146,13 +149,13 @@ function resolveSessionID(tool: Tool, cwd: string): string {
   let sessions: import("./opencode").SessionInfo[]
 
   if (tool === "opencode") {
-    sessions = discoverOpenCodeSessions(getOpenCodeDBPath(), cwd)
+    return resolveActiveSessionID(cwd)
   } else if (tool === "claude-code") {
-    sessions = discoverClaudeSessions(getDefaultProjectsDir(), cwd)
+    return resolveClaudeSessionID(getDefaultProjectsDir(), cwd)
   } else if (tool === "cursor") {
     sessions = discoverCursorSessions(getCursorProjectsDir(), cwd)
   } else {
-    sessions = discoverCodexSessions(getDefaultCodexDir(), cwd)
+    return resolveCodexSessionID(getDefaultCodexDir(), cwd)
   }
 
   if (sessions.length === 0) {

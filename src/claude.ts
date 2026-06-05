@@ -142,6 +142,41 @@ export function readMessagesFromFile(projectsDir: string, cwd: string, sessionID
     })
 }
 
+export function resolveActiveSessionID(projectsDir: string, cwd: string): string {
+  const sessionsDir = path.join(os.homedir(), ".claude", "sessions")
+  if (fs.existsSync(sessionsDir)) {
+    for (const entry of fs.readdirSync(sessionsDir)) {
+      if (!entry.endsWith(".json")) continue
+      try {
+        const data = JSON.parse(fs.readFileSync(path.join(sessionsDir, entry), "utf-8")) as {
+          pid?: number
+          sessionId?: string
+          cwd?: string
+        }
+        if (data.pid && data.sessionId && data.cwd === cwd) {
+          try {
+            process.kill(data.pid, 0)
+            return data.sessionId
+          } catch (err) {
+            if ((err as any).code !== "ESRCH") return data.sessionId
+          }
+        }
+      } catch {
+        // malformed JSON or race condition
+      }
+    }
+  }
+
+  const sessions = discoverSessions(projectsDir, cwd)
+  if (sessions.length === 0) {
+    throw new Error(
+      `No claude-code sessions found for directory ${cwd}. ` +
+        "Specify --session-id or start a session in this project.",
+    )
+  }
+  return sessions[0].id
+}
+
 export function readRawContent(projectsDir: string, cwd: string, sessionID: string): string {
   const filePath = sessionFilePath(projectsDir, cwd, sessionID)
   if (!fs.existsSync(filePath)) {

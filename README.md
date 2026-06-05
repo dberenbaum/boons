@@ -55,13 +55,14 @@ Once boons is installed, your agent handles the mechanics automatically:
 - **Auto-save** — After modifying files, wrapping up a task, or every ~15 messages of real work, your agent saves the session with a summary. No prompt needed.
 - **Push on request** — "Push my sessions" or after an auto-save, your agent asks if you want to share with the team.
 - **Pull on branch switch** — When switching to a branch with saved sessions, your agent suggests loading them.
+- **PR context** — When drafting or reviewing a PR, your agent loads session context to ground the description or review in the decision history.
 - **Query on demand** — "What did we decide about X?" Your agent searches the session history.
 
 ## Team Collaboration
 
 Sessions are scoped to branches. When you push code to a shared remote, you can push the matching sessions — they sync to a cloud bucket, not git, so the repo stays clean.
 
-**Author** — Work as usual. Sessions accumulate automatically. Call `session-push` when you want the team to see the context behind your code.
+**Author** — Work as usual. Sessions accumulate automatically. Call `boons-session-push` when you want the team to see the context behind your code.
 
 **Reviewer** — Pull the branch, then pull the sessions. Your agent reads the summaries and can answer questions about the decisions made, alternatives considered, and open questions — all before you look at a diff.
 
@@ -111,7 +112,7 @@ reproducing past states to finding and using relevant historical context.
 | Tool | Integration | Session Source |
 |------|-------------|----------------|
 | Open Code | Native plugin: custom tools + skills in `~/.config/opencode/` | `opencode.db` (SQLite) |
-| Claude Code | Plugin: 4 SKILL.md files in `~/.claude/plugins/boons/` | JSONL under `~/.claude/projects/` |
+| Claude Code | Plugin: 6 SKILL.md files in `~/.claude/plugins/boons/` | JSONL under `~/.claude/projects/` |
 | Cursor | `.mdc` rules in `~/.cursor/rules/` | Agent-transcript JSONL + SQLite metadata |
 | Codex | `AGENTS.md` rules + skills in `.agents/skills` or `~/.agents/skills` | JSONL under `~/.codex/sessions/` |
 

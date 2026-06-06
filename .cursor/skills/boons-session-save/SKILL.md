@@ -1,7 +1,18 @@
 ---
 name: boons-session-save
-description: "Auto-save at natural stopping points: before commits, before branch switches, every ~15 messages, or when user is satisfied. Do NOT ask."
+description: "Save session checkpoints automatically: after modifying files, before commits, before branch switches, every ~15 tool calls, or when user is satisfied. Load before git commit or branch switch."
 ---
+
+## When to load this skill
+
+Load this skill whenever you are about to or have just done any of the following:
+
+- Make a git commit
+- Switch branches (checkout, branch create)
+- Passed ~15 tool calls since the last save
+- Modified multiple files
+- Wrap up a task or discussion
+- The user expresses satisfaction ("looks good", "great", "thanks")
 
 ## What this does
 
@@ -13,7 +24,7 @@ Each export creates a session directory containing:
 - `summary.md` — a summary you auto-generate when saving
 - Any other files you include via `--file` (plan.md, decisions.md, etc.)
 
-## When to use this — be proactive
+## When to save — be proactive
 
 Run `boons session-save --tool cursor --summary "..."` **automatically**
 (no need to ask the user) when:
@@ -22,8 +33,8 @@ Run `boons session-save --tool cursor --summary "..."` **automatically**
   add a commit, or fix a bug. You know work happened; save it.
 - **The user expresses satisfaction** — "that works", "looks good", "great",
   "thanks". Treat this as a close signal worth capturing.
-- **Every ~15 messages** of activity involving file changes — save a checkpoint
-  so the session history is never more than a few exchanges behind.
+- **Every ~15 tool calls** since the last save — save a checkpoint so the
+  session history is never more than a few exchanges behind.
 - **A git commit is made** — if you were involved in the commit, save first
   so the session matches the commit.
 - **Before creating a branch** — save before running `git checkout -b` or

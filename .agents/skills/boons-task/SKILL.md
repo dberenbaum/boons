@@ -1,10 +1,16 @@
 ---
 name: boons-task
 description: >
-  Project task runner. After discovering commands (setup, build, test, deploy),
-  save them as scripts. Before running project commands, load this to check
-  what's available. Update scripts when commands or env vars change.
+  Project task runner. Always check `boons task --list` before running any
+  project command (install, build, test, deploy, etc.). Use `boons task <name>`
+  instead of running commands directly. Save discovered commands as scripts.
 ---
+
+## When to load this skill
+
+Load this skill whenever you are about to run any project-level command:
+`npm install`, `bun run`, `pip install`, `make`, `cargo`, `go build`,
+`docker compose`, or similar. First check if a task script exists.
 
 ## What this does
 
@@ -25,6 +31,14 @@ interrupt work mid-task.
 | `boons task --check` | Print script content without executing |
 | `boons task --path` | Print scripts directory path |
 | `boons task --env` | Open/create `.env` in $EDITOR |
+
+## Protocol
+
+1. **Before running any project command** → run `boons task --list` first
+2. **If a matching script exists** → use `boons task <name>` instead
+3. **If no matching script** → run the command directly, then save it as a task script
+4. **After running** → check status with `boons task read <name> --status`
+5. **If the command changes** → update the script
 
 ## When to create task scripts
 
@@ -52,15 +66,6 @@ would need to run again.
 - First `#` comment after optional shebang is the `--list` description
 - `set -euo pipefail` is recommended to fail fast
 - `.env` vars are sourced automatically before execution
-
-## When to consume (run)
-
-- After `git clone` — run `boons task` (or `boons task --list` then `boons task setup`)
-- Before testing — check if `test.sh` exists with `boons task --list`
-- Before deploying — run `boons task deploy`
-- After a usage cap resets — run `boons task <name>` to continue where you left off
-
-Always check availability first: `boons task --list`.
 
 ## When to iterate (update)
 

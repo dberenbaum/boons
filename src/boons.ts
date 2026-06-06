@@ -560,12 +560,10 @@ async function cmdInstall(tool: string, args: Record<string, string>) {
       console.log("Before committing, pushing, or switching branches — and every ~15")
       console.log("messages — load the boons-session-save skill and follow its guidance.")
       console.log("")
-      console.log("This project uses `boons task` for project commands. Run `boons task --list`")
-      console.log("to see available scripts (setup, build, test, deploy, etc.). When you")
-      console.log("discover how to run or build this project, save commands as task scripts")
-      console.log("via `boons task <name>` and use `boons task read <name> --status` to")
-      console.log("inspect results without reading full output. Update scripts when commands")
-      console.log("change.")
+      console.log("Before running any project command (install, build, test, deploy, etc.),")
+      console.log("load the boons-task skill and run `boons task --list` to check for an")
+      console.log("existing script. Use `boons task <name>` instead of running commands")
+      console.log("directly. When you discover new commands, save them as task scripts.")
       console.log("")
       console.log("Also available: boons-session-load (prior context), boons-session-push (share")
       console.log("to cloud), boons-session-pull (fetch from cloud), boons-pr-draft (PR")
@@ -583,12 +581,10 @@ function addRulesPointer(filePath: string) {
     "Before committing, pushing, or switching branches — and every ~15",
     "messages — load the boons-session-save skill and follow its guidance.",
     "",
-    "This project uses `boons task` for project commands. Run `boons task --list`",
-    "to see available scripts (setup, build, test, deploy, etc.). When you",
-    "discover how to run or build this project, save commands as task scripts",
-    "via `boons task <name>` and use `boons task read <name> --status` to",
-    "inspect results without reading full output. Update scripts when commands",
-    "change.",
+    "Before running any project command (install, build, test, deploy, etc.),",
+    "load the boons-task skill and run `boons task --list` to check for an",
+    "existing script. Use `boons task <name>` instead of running commands",
+    "directly. When you discover new commands, save them as task scripts.",
     "",
     "Also available: boons-session-load (prior context), boons-session-push (share",
     "to cloud), boons-session-pull (fetch from cloud), boons-pr-draft (PR",
@@ -1085,10 +1081,16 @@ function taskSkillContent(): string {
   return `---
 name: boons-task
 description: >
-  Project task runner. After discovering commands (setup, build, test, deploy),
-  save them as scripts. Before running project commands, load this to check
-  what's available. Update scripts when commands or env vars change.
+  Project task runner. Always check \`boons task --list\` before running any
+  project command (install, build, test, deploy, etc.). Use \`boons task <name>\`
+  instead of running commands directly. Save discovered commands as scripts.
 ---
+
+## When to load this skill
+
+Load this skill whenever you are about to run any project-level command:
+\`npm install\`, \`bun run\`, \`pip install\`, \`make\`, \`cargo\`, \`go build\`,
+\`docker compose\`, or similar. First check if a task script exists.
 
 ## What this does
 
@@ -1109,6 +1111,14 @@ interrupt work mid-task.
 | \`boons task --check\` | Print script content without executing |
 | \`boons task --path\` | Print scripts directory path |
 | \`boons task --env\` | Open/create \`.env\` in \$EDITOR |
+
+## Protocol
+
+1. **Before running any project command** → run \`boons task --list\` first
+2. **If a matching script exists** → use \`boons task <name>\` instead
+3. **If no matching script** → run the command directly, then save it as a task script
+4. **After running** → check status with \`boons task read <name> --status\`
+5. **If the command changes** → update the script
 
 ## When to create task scripts
 
@@ -1136,15 +1146,6 @@ would need to run again.
 - First \`#\` comment after optional shebang is the \`--list\` description
 - \`set -euo pipefail\` is recommended to fail fast
 - \`.env\` vars are sourced automatically before execution
-
-## When to consume (run)
-
-- After \`git clone\` — run \`boons task\` (or \`boons task --list\` then \`boons task setup\`)
-- Before testing — check if \`test.sh\` exists with \`boons task --list\`
-- Before deploying — run \`boons task deploy\`
-- After a usage cap resets — run \`boons task <name>\` to continue where you left off
-
-Always check availability first: \`boons task --list\`.
 
 ## When to iterate (update)
 

@@ -1,3 +1,4 @@
+<!-- boons -->
 # boons
 
 Before committing, pushing, or switching branches — and every ~15
@@ -13,3 +14,4 @@ change.
 Also available: boons-session-load (prior context), boons-session-push (share
 to cloud), boons-session-pull (fetch from cloud), boons-pr-draft (PR
 descriptions), boons-pr-review (PR reviews), boons-task (project task runner).
+<!-- /boons -->

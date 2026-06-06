@@ -554,6 +554,7 @@ async function cmdInstall(tool: string, args: Record<string, string>) {
       console.log("Cursor stores global rules in its internal database.")
       console.log("Open Settings > Rules > User Rules and paste:")
       console.log("")
+      console.log("<!-- boons -->")
       console.log("# boons")
       console.log("")
       console.log("Before committing, pushing, or switching branches — and every ~15")
@@ -569,12 +570,14 @@ async function cmdInstall(tool: string, args: Record<string, string>) {
       console.log("Also available: boons-session-load (prior context), boons-session-push (share")
       console.log("to cloud), boons-session-pull (fetch from cloud), boons-pr-draft (PR")
       console.log("descriptions), boons-pr-review (PR reviews), boons-task (project task runner).")
+      console.log("<!-- /boons -->")
     }
   }
 }
 
 function addRulesPointer(filePath: string) {
   const block = [
+    "<!-- boons -->",
     "# boons",
     "",
     "Before committing, pushing, or switching branches — and every ~15",
@@ -590,6 +593,7 @@ function addRulesPointer(filePath: string) {
     "Also available: boons-session-load (prior context), boons-session-push (share",
     "to cloud), boons-session-pull (fetch from cloud), boons-pr-draft (PR",
     "descriptions), boons-pr-review (PR reviews), boons-task (project task runner).",
+    "<!-- /boons -->",
     "",
   ].join("\n")
 
@@ -597,19 +601,41 @@ function addRulesPointer(filePath: string) {
     try { return fs.readFileSync(filePath, "utf-8") } catch { return "" }
   })()
 
-  if (existing.includes("# boons\n\nBefore committing")) return
+  // Exact block already present — nothing to do
+  if (existing.includes(block)) return
 
-  const updated = existing === "" || existing.endsWith("\n")
-    ? existing + block
-    : existing + "\n" + block
+  let updated: string
 
-  fs.mkdirSync(path.dirname(filePath), { recursive: true })
-  fs.writeFileSync(filePath, updated)
-  console.log(`Added boons rule to ${path.basename(filePath)}`)
+  // Check for marker-delimited boons section
+  const endMarker = "<!-- /boons -->"
+  const endIdx = existing.indexOf(endMarker)
+  if (endIdx >= 0) {
+    const startMarker = "<!-- boons -->"
+    const startIdx = existing.lastIndexOf(startMarker, endIdx)
+    const replaceStart = startIdx >= 0 ? startIdx : existing.lastIndexOf("\n", endIdx - 1) + 1
+    updated = existing.slice(0, replaceStart) + block + existing.slice(endIdx + endMarker.length)
+  } else {
+    // Check for old-format boons section (no markers)
+    const boonsLine = existing.indexOf("\n# boons\n")
+    const hasOldBoons = boonsLine >= 0 || existing.startsWith("# boons\n")
+    if (hasOldBoons) {
+      const start = boonsLine >= 0 ? boonsLine + 1 : 0
+      const rest = existing.slice(start + 7)
+      const nextHeading = rest.search(/\n(?=# )/)
+      const sectionEnd = nextHeading >= 0 ? start + 7 + nextHeading + 1 : existing.length
+      updated = existing.slice(0, start) + block + existing.slice(sectionEnd)
+    } else {
+      // No boons section — append
+      updated = existing === "" || existing.endsWith("\n")
+        ? existing + block
+        : existing + "\n" + block
+    }
+  }
 
-  const overridePath = path.join(path.dirname(filePath), "AGENTS.override.md")
-  if (path.basename(filePath) === "AGENTS.md" && fs.existsSync(overridePath)) {
-    console.log(`Note: ${overridePath} exists and may override AGENTS.md guidance for Codex.`)
+  if (updated !== existing) {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true })
+    fs.writeFileSync(filePath, updated)
+    console.log(`Added boons rule to ${path.basename(filePath)}`)
   }
 }
 

@@ -742,7 +742,7 @@ const tools: Record<string, ToolInfo> = {
 function saveSkillContent(t: ToolInfo): string {
   return `---
 name: boons-session-save
-description: Auto-save at natural stopping points: before commits, before branch switches, every ~15 messages, or when user is satisfied. Do NOT ask.
+description: "Auto-save at natural stopping points: before commits, before branch switches, every ~15 messages, or when user is satisfied. Do NOT ask."
 ---
 
 ## What this does

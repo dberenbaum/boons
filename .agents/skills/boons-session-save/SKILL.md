@@ -1,11 +1,22 @@
 ---
 name: boons-session-save
-description: "Auto-save at natural stopping points: before commits, before branch switches, every ~15 messages, or when user is satisfied. Do NOT ask."
+description: "Save session checkpoints automatically: after modifying files, before commits, before branch switches, every ~15 tool calls, or when user is satisfied. Load before git commit or branch switch."
 ---
+
+## When to load this skill
+
+Load this skill whenever you are about to or have just done any of the following:
+
+- Make a git commit
+- Switch branches (checkout, branch create)
+- Passed ~15 tool calls since the last save
+- Modified multiple files
+- Wrap up a task or discussion
+- The user expresses satisfaction ("looks good", "great", "thanks")
 
 ## What this does
 
-Export the current chat session to the `.boons/` artifact directory.
+Export the current chat session for the current branch.
 Each export creates a session directory containing:
 
 - `raw.jsonl` — the complete message history in native format
@@ -13,17 +24,25 @@ Each export creates a session directory containing:
 - `summary.md` — a summary you auto-generate when saving
 - Any other files you include via `--file` (plan.md, decisions.md, etc.)
 
-## When to use this — be proactive
+## When to save — be proactive
 
 Run `boons session-save --tool codex --summary "..."` **automatically**
 (no need to ask the user) when:
 
 - **You modified files** — after writing code that changes multiple files,
   add a commit, or fix a bug. You know work happened; save it.
+- **After planning or exploration** — after researching options,
+  exploring the codebase, or formulating a plan. Write a `plan.md`
+  with intent and next steps and save it via `--file` so a fresh
+  session can pick up execution without re-exploring.
+- **Before large or batch operations** — before making many edits,
+  running long test suites, or generating significant code.
+  Checkpoint first so you can resume if a rate limit or error
+  interrupts mid-operation.
 - **The user expresses satisfaction** — "that works", "looks good", "great",
   "thanks". Treat this as a close signal worth capturing.
-- **Every ~15 messages** of activity involving file changes — save a checkpoint
-  so the session history is never more than a few exchanges behind.
+- **Every ~15 tool calls** since the last save — save a checkpoint so the
+  session history is never more than a few exchanges behind.
 - **A git commit is made** — if you were involved in the commit, save first
   so the session matches the commit.
 - **Before creating a branch** — save before running `git checkout -b` or

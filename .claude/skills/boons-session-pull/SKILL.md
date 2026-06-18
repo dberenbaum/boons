@@ -1,6 +1,6 @@
 ---
 name: boons-session-pull
-description: Fetch remote context after git pull or before code review. Pull .boons/ from cloud.
+description: Fetch remote context after git pull or before code review. Pull sessions from cloud.
 ---
 
 ## What this does
@@ -20,7 +20,7 @@ Run `boons pull` when:
 
 1. First run `boons ls --remote` to see what sessions exist for the
    current branch
-2. Then run `boons pull` to fetch them into `.boons/<branch>/`
+2. Then run `boons pull` to fetch them for the current branch
 3. After pulling, use the boons-session-load guidance to read them
 
 ## Default behavior

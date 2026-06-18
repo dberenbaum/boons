@@ -1,9 +1,10 @@
 ---
 name: boons-task
 description: >
-  Project task runner. Always check `boons task --list` before running any
+  Project task runner. Always check `boons task list` before running any
   project command (install, build, test, deploy, etc.). Use `boons task <name>`
-  instead of running commands directly. Save discovered commands as scripts.
+  instead of running commands directly. Auto-create task scripts for repeatable
+  commands, extract env vars, and update scripts on failure.
 ---
 
 ## When to load this skill
@@ -14,7 +15,7 @@ Load this skill whenever you are about to run any project-level command:
 
 ## What this does
 
-Manages per-project task scripts at `~/.config/boons/projects/<repo-key>/scripts/`.
+Manages per-project task scripts at `~/.boons/tasks/<repo-key>/scripts/`.
 Scripts are shell scripts that survive agent sessions — useful when usage caps
 interrupt work mid-task.
 
@@ -25,37 +26,123 @@ interrupt work mid-task.
 | `boons task` | Run `setup.sh` silently; log to `.logs/setup.log` |
 | `boons task <name>` | Run `<name>.sh` silently; log to `.logs/<name>.log` |
 | `boons task <name> --verbose` | Run with live terminal output |
+| `boons task list` | List available scripts with descriptions |
+| `boons task check` | Print script content without executing |
+| `boons task path` | Print scripts directory path |
 | `boons task read <name>` | Print task output (excluding status header) |
 | `boons task read <name> --status` | Print exit code (0 = success) |
-| `boons task --list` | List available scripts with descriptions |
-| `boons task --check` | Print script content without executing |
-| `boons task --path` | Print scripts directory path |
-| `boons task --env` | Open/create `.env` in $EDITOR |
+| `boons task create <name> --file <path>` | Create a task script from a file |
+| `boons task create <name> --command "<cmd>"` | Create from a one-liner command |
+| `boons task create <name> --file <path> --force` | Overwrite existing script |
+| `boons task update <name> --command "<cmd>"` | Update script body, keep description |
+| `boons task env` | Open/create `.env` in $EDITOR |
+| `boons task env set KEY=VALUE [...]` | Set environment variables |
+| `boons task env get <KEY>` | Print a single env var |
+| `boons task env list` | List all env vars |
 
-## Protocol
+## Rules — you MUST follow these
 
-1. **Before running any project command** → run `boons task --list` first
-2. **If a matching script exists** → use `boons task <name>` instead
-3. **If no matching script** → run the command directly, then save it as a task script
-4. **After running** → check status with `boons task read <name> --status`
-5. **If the command changes** → update the script
+### 1. Always check first
 
-## When to create task scripts
+Before running any project-level command (`npm install`, `bun test`, `cargo build`, etc.):
+**run `boons task list` first.** If a matching script exists, use
+`boons task <name>` — do not run the raw command.
 
-Write a new script when you discover a repeatable project command:
+### 2. Auto-create immediately
 
-- **Setup**: package install, git hooks, env file init → `setup.sh`
-- **Build**: compile, bundle, typecheck → `build.sh`
-- **Test**: unit tests, integration tests, linting → `test.sh`
-- **Deploy**: deploy to staging/production → `deploy.sh`
-- **Seed**: database migrations, test data → `seed.sh`
-- **Dev**: run dev server, watch mode → `dev.sh`
+After running a matching command from the table below, **you MUST immediately
+create a task script** using `boons task create`. Do not move on without doing this.
 
-Don't write scripts for one-off commands (ephemeral debugging, single
-investigations). Only save commands that someone (including a future you)
-would need to run again.
+| If you ran... | Create with... |
+|---|---|
+| `npm install`, `bun install`, `pip install`, `uv sync`, `poetry install`, `cargo build` (first run) | `boons task create setup --command "<cmd>"` |
+| `npm run build`, `bun run build`, `cargo build`, `go build`, `make` | `boons task create build --command "<cmd>"` |
+| `npm test`, `bun test`, `pytest`, `cargo test`, `go test`, `vitest` | `boons task create test --command "<cmd>"` |
+| `npm run lint`, `eslint`, `ruff`, `biome lint` | `boons task create lint --command "<cmd>"` |
+| `npm run dev`, `bun run dev`, `cargo watch` | `boons task create dev --command "<cmd>"` |
+| `docker compose up`, `docker compose down` | `boons task create docker --command "<cmd>"` |
+| Database migration/seed commands | `boons task create seed --command "<cmd>"` |
+| Deployment commands | `boons task create deploy --command "<cmd>"` |
 
-### Script format
+**Skip auto-create** for one-off commands: `ls`, `cat`, `cd`, `curl`,
+`grep`, `find`, `echo`, `mkdir`, `touch`, `rm`, `git log`, `git diff`,
+`git status`, `git add`, `gh` subcommands, or any command you wouldn't
+run twice.
+
+### 3. How to create
+
+Write the script to a temp file, validate with `bash -n /tmp/<name>.sh`,
+then register:
+
+    boons task create <name> --file /tmp/<name>.sh
+
+For one-liners, skip the file:
+
+    boons task create build --command "npm run build"
+
+### 4. Extract env vars from commands
+
+When creating a task, examine the command for values that should be
+configurable rather than hardcoded:
+
+- **Secrets**: API keys, tokens, passwords — extract to `.env`, reference as `$VAR` in script
+- **Environment-specific URLs**: database URLs, API endpoints, hosts — extract to `.env`
+- **Config that varies**: ports, versions, registry URLs, feature flags — extract to `.env`
+
+Workflow:
+1. Strip `KEY=VALUE` prefixes from the command before saving the script
+2. Replace hardcoded values with `$VAR` references in the script body
+3. Register values with `boons task env set KEY=VALUE`
+
+Example:
+```
+# Instead of saving:
+npm run migrate --database-url postgres://user:pass@localhost:5432/dev
+
+# Save the script with an env var reference:
+npm run migrate --database-url $DATABASE_URL
+
+# And set the value:
+boons task env set DATABASE_URL=postgres://user:pass@localhost:5432/dev
+```
+
+### 5. Task fails → fix then update
+
+After every `boons task <name>` run, check `boons task read <name> --status`.
+If the exit code is non-zero:
+
+1. Debug the issue
+2. Find the corrected command
+3. Run it directly to confirm it works
+4. **Update the script** so no future agent hits the same failure:
+
+   ```
+   boons task update <name> --command "<corrected command>"
+   ```
+
+   This preserves the existing description but replaces the script body.
+
+   If the command is complex, write the corrected version to a temp file and use
+   `--file` instead:
+
+   ```
+   boons task create <name> --file /tmp/<name>.sh --force
+   ```
+
+Do not leave a broken script. Always update after fixing.
+
+## Non-bash shells
+
+By default, `--command` generates `#!/bin/bash` scripts. To use a different
+shell (e.g., `zsh`):
+
+1. Write the script to a temp file with `#!/usr/bin/env zsh`
+2. Validate: `zsh -n /tmp/<name>.sh`
+3. Register: `boons task create <name> --file /tmp/<name>.sh`
+
+boons detects the shebang and runs the correct interpreter at execution time.
+
+## Script format
 
     #!/bin/bash
     # One-line description shown by --list
@@ -63,21 +150,18 @@ would need to run again.
 
     echo "Hello from my task"
 
-- First `#` comment after optional shebang is the `--list` description
+- First `#` comment after the shebang is the `--list` description
 - `set -euo pipefail` is recommended to fail fast
 - `.env` vars are sourced automatically before execution
 
-## When to iterate (update)
+## Security
 
-Update an existing script when:
-
-- Package manager changed (npm → pnpm, pip → uv, etc.)
-- Build/test commands changed
-- Environment variables were added or renamed
-- The script failed and you fixed it
-
-Overwrite the file in place. The `--check` flag lets you review what's
-there before running.
+- `.env` files are written with `chmod 600` (owner read/write only)
+- Prefer shell-level env vars (`$DATABASE_URL` set in your terminal or
+  `.zshrc`) for truly sensitive secrets — `.env` is best for non-sensitive
+  config (ports, endpoints, versions)
+- `boons push` does not include task scripts or `.env` files —
+  only session artifacts
 
 ## Inspection
 
@@ -85,5 +169,5 @@ After running a task, use `boons task read <name>` to see output without
 re-executing. Use `boons task read <name> --status` to check success
 before deciding whether to read the full log.
 
-Logs live at `~/.config/boons/projects/<repo-key>/.logs/<name>.log` with
+Logs live at `~/.boons/tasks/<repo-key>/.logs/<name>.log` with
 a `# exit: <code>` header on the first line.

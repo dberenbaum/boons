@@ -1,16 +1,16 @@
 ---
 name: boons-session-load
-description: Load prior context on branch switch, before new features, or when drafting PRs. Read .boons/ session summaries.
+description: Load prior context on branch switch, before new features, or when drafting PRs. Read saved session summaries.
 ---
 
 ## What this does
 
 Guides the agent in discovering and using saved session artifacts
-from the `.boons/` directory to understand prior work on a branch.
+to understand prior work on a branch.
 
 ## Available files per session
 
-Every saved session directory (`.boons/<branch>/<session-id>/`) contains:
+Every saved session directory contains:
 
 - `info.json` — metadata (name, author, participants, timestamps)
 - `raw.jsonl` — complete message history in native format

@@ -25,8 +25,6 @@ import {
   readMessagesFromFile as readCodexMessagesFromFile,
 } from "./codex"
 import {
-  readConfig,
-  writeConfig,
   writeGlobalConfig,
   readGlobalConfig,
   getRepoKey,
@@ -34,19 +32,25 @@ import {
   push,
   pull,
   listRemote,
+  getSessionsDir,
+  getSessionsBranchDir,
 } from "./cloud"
 import {
-  runScript,
-  readLog,
-  readStatus,
   listScripts,
   getScript,
+  runScript,
   printScripts,
   printCheck,
   printPath,
-  handleEnv,
-  scriptsDirPath,
+  readLog,
+  readStatus,
+  createScript,
+  setEnvVar,
+  getEnvVar,
+  listEnvVars,
   logFilePath,
+  logsDirPath,
+  handleEnv,
 } from "./task"
 
 let pipedAnswers: string[] | null | undefined
@@ -135,19 +139,29 @@ Usage:
                                                         Save session + authored files
   boons ls [--branch <name>] [--json]                   List saved sessions
   boons ls --remote [--branch <name>] [--json]          List remote sessions
-  boons install <tool>                                Install skills for a tool (+ global .gitignore + global rules)
-  boons install <tool> --project                      Install skills scoped to the project (+ project .gitignore + project rules)
+   boons install <tool>                                Install skills for a tool (+ global rules)
+   boons install <tool> --project                      Install skills scoped to the project (+ project rules)
   boons remote                                          Show remote config, or prompt if none
   boons remote --provider aws|gcp|azure ...             Configure cloud remote
-  boons remote --project --provider aws|gcp|azure ...   Configure cloud remote per-project
+   boons remote --project --provider aws|gcp|azure ...   Configure cloud remote per-repo (stored in global config)
   boons push [--session-id <id>] [--branch <b>]         Push sessions to cloud
    boons pull [--session-id <id>] [--branch <b>]         Pull sessions from cloud
-   boons task [<name>] [--verbose]                        Run a task script (default: setup.sh)
-   boons task --list                                      List available task scripts
-   boons task --check                                     Print task scripts without running
-   boons task --path                                      Print task scripts directory
-   boons task --env                                       Open project .env file
-   boons task read <name> [--status]                      Read task output or exit status
+    boons task [<name>] [--verbose] [-- <args>...]      Run a task script (default: setup.sh); pass args after --
+    boons task list                                      List available task scripts
+    boons task check                                     Print task scripts without running
+    boons task path                                      Print scripts directory path
+    boons task path --logs                               Print logs directory path
+    boons task path --log <name>                         Print log file path for a task
+    boons task path <name>                               Print script file path for a task
+    boons task read <name> [--status]                    Read task output or exit status
+    boons task create <name> [--file <path>]             Create a task script from file or command
+                     [--command "<cmd>"] [--force]
+    boons task update <name> [--file <path>]             Update task script (preserves description)
+                     [--command "<cmd>"]
+    boons task env                                       Open project .env file in editor
+    boons task env set <KEY=VALUE> [...]                 Set environment variables
+    boons task env get <KEY>                             Get an environment variable
+    boons task env list                                  List all environment variables
    boons --help                                          Show this message
 
 Remote flags:
@@ -164,7 +178,7 @@ Options:
   --session-id <id>   Session to read/save/push/pull (required for session-read, auto-detect for others)
   --file <path>       File to include in session directory (repeatable, for session-save)
   --branch <name>     Filter by branch (default: current branch)
-  --global            Install globally (default; use --project for project-scoped)
+   --global            Install globally (default; use --project for project-scoped skills)
   --json              Output as JSON (for tool integration)
 
 Tools:
@@ -286,12 +300,12 @@ async function cmdLs(args: Record<string, string>) {
     return
   }
 
-  const boonsDir = path.join(cwd, ".boons")
+  const boonsDir = getSessionsDir(cwd)
   const branchFilter = args["--branch"]
   const asJson = args["--json"] === "true"
 
   if (!fs.existsSync(boonsDir)) {
-    console.log("No .boons/ directory found.")
+    console.log("No saved sessions found.")
     return
   }
 
@@ -430,40 +444,7 @@ async function cmdLsRemote(args: Record<string, string>) {
   }
 }
 
-function getGlobalGitignorePath(): string {
-  try {
-    const buf = Bun.spawnSync(["git", "config", "--global", "core.excludesfile"])
-    const resolved = buf.stdout.toString().trim()
-    if (resolved) return resolved
-  } catch {}
-  return path.join(os.homedir(), ".config", "git", "ignore")
-}
 
-function addBoonsToGitignore(scope: "global" | "project") {
-  const gitignorePath = scope === "global"
-    ? getGlobalGitignorePath()
-    : path.join(process.cwd(), ".gitignore")
-
-  const gitignoreContent = (() => {
-    try { return fs.readFileSync(gitignorePath, "utf-8") } catch { return "" }
-  })()
-
-  const lines = gitignoreContent.split("\n")
-  const hasBoons = lines.some((l) => l.trim() === ".boons/")
-  const hasException = lines.some((l) => l.trim() === "!.boons/config.json")
-
-  let updated = gitignoreContent
-  if (!hasException && hasBoons) {
-    updated = updated.replace(".boons/", ".boons/\n!.boons/config.json")
-  } else if (!hasBoons) {
-    updated = (updated.endsWith("\n") ? updated : updated + "\n") + ".boons/\n!.boons/config.json\n"
-  }
-  if (updated !== gitignoreContent) {
-    fs.mkdirSync(path.dirname(gitignorePath), { recursive: true })
-    fs.writeFileSync(gitignorePath, updated)
-    console.log(`Updated ${scope === "global" ? "global" : "project"} .gitignore with .boons/ entries`)
-  }
-}
 
 async function askRemoteConfig(skipConfirm = false): Promise<RemoteConfig | null> {
   if (!skipConfirm) {
@@ -501,25 +482,23 @@ async function askRemoteConfig(skipConfirm = false): Promise<RemoteConfig | null
   return remote as RemoteConfig
 }
 
-function writeConfigTarget(target: "per-repo" | "repo-keyed" | "global-default", config: Config, cwd: string): void {
+function writeConfigTarget(target: "project" | "global-default", config: RemoteConfig, cwd: string): void {
   if (target === "global-default") {
     const globalCfg = readGlobalConfig()
-    globalCfg.default = config.remote!
+    globalCfg.default = config
     writeGlobalConfig(globalCfg)
-    console.log("Wrote to ~/.config/boons/config.json (default)")
-  } else if (target === "repo-keyed") {
+    console.log("Wrote to ~/.boons/config.json (default)")
+  } else {
     const repoKey = getRepoKey(cwd)
     if (!repoKey) {
-      console.error("No git remote origin found. Cannot write repo-keyed global config.")
+      console.error("No git remote origin found. Cannot write repo-keyed config.")
       process.exit(1)
     }
     const globalCfg = readGlobalConfig()
     if (!globalCfg.repos) globalCfg.repos = {}
-    globalCfg.repos[repoKey] = config.remote!
+    globalCfg.repos[repoKey] = config
     writeGlobalConfig(globalCfg)
-    console.log(`Wrote to ~/.config/boons/config.json (repos.${repoKey})`)
-  } else {
-    writeConfig(config, cwd)
+    console.log(`Wrote to ~/.boons/config.json (repos.${repoKey})`)
   }
 }
 
@@ -544,54 +523,41 @@ async function cmdInstall(tool: string, args: Record<string, string>) {
   const info = tools[tool]
 
   if (projectDir) {
-    addBoonsToGitignore("project")
     addRulesPointer(path.join(process.cwd(), info.projectRulesFile))
   } else {
-    addBoonsToGitignore("global")
     if (info.globalRulesFile) {
       addRulesPointer(path.join(os.homedir(), info.globalRulesFile))
     } else {
       console.log("Cursor stores global rules in its internal database.")
       console.log("Open Settings > Rules > User Rules and paste:")
       console.log("")
-      console.log("<!-- boons -->")
-      console.log("# boons")
-      console.log("")
-      console.log("Before committing, pushing, or switching branches — and every ~15")
-      console.log("messages — load the boons-session-save skill and follow its guidance.")
-      console.log("")
-      console.log("Before running any project command (install, build, test, deploy, etc.),")
-      console.log("load the boons-task skill and run `boons task --list` to check for an")
-      console.log("existing script. Use `boons task <name>` instead of running commands")
-      console.log("directly. When you discover new commands, save them as task scripts.")
-      console.log("")
-      console.log("Also available: boons-session-load (prior context), boons-session-push (share")
-      console.log("to cloud), boons-session-pull (fetch from cloud), boons-pr-draft (PR")
-      console.log("descriptions), boons-pr-review (PR reviews), boons-task (project task runner).")
-      console.log("<!-- /boons -->")
+      for (const line of BOONS_BLOCK.split("\n")) console.log(line)
     }
   }
 }
 
+const BOONS_BLOCK = [
+  "<!-- boons -->",
+  "# boons",
+  "",
+  "Save sessions after modifying files, after making plans, before",
+  "committing, before switching branches, or every ~15 tool calls.",
+  "Use `boons session-save --summary \"...\"`.",
+  "",
+  "Before running any project command (install, build, test, deploy, etc.),",
+  "load the boons-task skill and run `boons task list` to check for an",
+  "existing script. Use `boons task <name>` instead, or auto-create one with",
+  "`boons task create <name> --command \"<cmd>\"` after running the command.",
+  "",
+  "Also available: boons-session-load (prior context), boons-session-push (share",
+  "to cloud), boons-session-pull (fetch from cloud), boons-pr-draft (PR",
+  "descriptions), boons-pr-review (PR reviews), boons-task (project task runner).",
+  "<!-- /boons -->",
+  "",
+].join("\n")
+
 function addRulesPointer(filePath: string) {
-  const block = [
-    "<!-- boons -->",
-    "# boons",
-    "",
-    "Before committing, pushing, or switching branches — and every ~15",
-    "messages — load the boons-session-save skill and follow its guidance.",
-    "",
-    "Before running any project command (install, build, test, deploy, etc.),",
-    "load the boons-task skill and run `boons task --list` to check for an",
-    "existing script. Use `boons task <name>` instead of running commands",
-    "directly. When you discover new commands, save them as task scripts.",
-    "",
-    "Also available: boons-session-load (prior context), boons-session-push (share",
-    "to cloud), boons-session-pull (fetch from cloud), boons-pr-draft (PR",
-    "descriptions), boons-pr-review (PR reviews), boons-task (project task runner).",
-    "<!-- /boons -->",
-    "",
-  ].join("\n")
+  const block = BOONS_BLOCK
 
   const existing = (() => {
     try { return fs.readFileSync(filePath, "utf-8") } catch { return "" }
@@ -742,12 +708,23 @@ const tools: Record<string, ToolInfo> = {
 function saveSkillContent(t: ToolInfo): string {
   return `---
 name: boons-session-save
-description: "Auto-save at natural stopping points: before commits, before branch switches, every ~15 messages, or when user is satisfied. Do NOT ask."
+description: "Save session checkpoints automatically: after modifying files, before commits, before branch switches, every ~15 tool calls, or when user is satisfied. Load before git commit or branch switch."
 ---
+
+## When to load this skill
+
+Load this skill whenever you are about to or have just done any of the following:
+
+- Make a git commit
+- Switch branches (checkout, branch create)
+- Passed ~15 tool calls since the last save
+- Modified multiple files
+- Wrap up a task or discussion
+- The user expresses satisfaction ("looks good", "great", "thanks")
 
 ## What this does
 
-Export the current chat session to the \`.boons/\` artifact directory.
+Export the current chat session for the current branch.
 Each export creates a session directory containing:
 
 - \`raw.jsonl\` — the complete message history in native format
@@ -755,17 +732,25 @@ Each export creates a session directory containing:
 - \`summary.md\` — a summary you auto-generate when saving
 - Any other files you include via \`--file\` (plan.md, decisions.md, etc.)
 
-## When to use this — be proactive
+## When to save — be proactive
 
 Run \`boons session-save --tool ${t.flag} --summary "..."\` **automatically**
 (no need to ask the user) when:
 
 - **You modified files** — after writing code that changes multiple files,
   add a commit, or fix a bug. You know work happened; save it.
+- **After planning or exploration** — after researching options,
+  exploring the codebase, or formulating a plan. Write a \`plan.md\`
+  with intent and next steps and save it via \`--file\` so a fresh
+  session can pick up execution without re-exploring.
+- **Before large or batch operations** — before making many edits,
+  running long test suites, or generating significant code.
+  Checkpoint first so you can resume if a rate limit or error
+  interrupts mid-operation.
 - **The user expresses satisfaction** — "that works", "looks good", "great",
   "thanks". Treat this as a close signal worth capturing.
-- **Every ~15 messages** of activity involving file changes — save a checkpoint
-  so the session history is never more than a few exchanges behind.
+- **Every ~15 tool calls** since the last save — save a checkpoint so the
+  session history is never more than a few exchanges behind.
 - **A git commit is made** — if you were involved in the commit, save first
   so the session matches the commit.
 - **Before creating a branch** — save before running \`git checkout -b\` or
@@ -830,17 +815,17 @@ for all artifacts related to a session.
 function loadSkillContent(t: ToolInfo): string {
   return `---
 name: boons-session-load
-description: Load prior context on branch switch, before new features, or when drafting PRs. Read .boons/ session summaries.
+description: Load prior context on branch switch, before new features, or when drafting PRs. Read saved session summaries.
 ---
 
 ## What this does
 
 Guides the agent in discovering and using saved session artifacts
-from the \`.boons/\` directory to understand prior work on a branch.
+to understand prior work on a branch.
 
 ## Available files per session
 
-Every saved session directory (\`.boons/<branch>/<session-id>/\`) contains:
+Every saved session directory contains:
 
 - \`info.json\` — metadata (name, author, participants, timestamps)
 - \`raw.jsonl\` — complete message history in native format
@@ -932,7 +917,7 @@ as the starting point.
 function pushSkillContent(t: ToolInfo): string {
   return `---
 name: boons-session-push
-description: Ask to share after auto-save, before git push, or before PR review. Push .boons/ to cloud. Always ask user.
+description: Ask to share after auto-save, before git push, or before PR review. Push sessions to cloud. Always ask user.
 ---
 
 ## What this does
@@ -974,7 +959,7 @@ whatever is in the local session directory.
 function pullSkillContent(t: ToolInfo): string {
   return `---
 name: boons-session-pull
-description: Fetch remote context after git pull or before code review. Pull .boons/ from cloud.
+description: Fetch remote context after git pull or before code review. Pull sessions from cloud.
 ---
 
 ## What this does
@@ -994,7 +979,7 @@ Run \`boons pull\` when:
 
 1. First run \`boons ls --remote\` to see what sessions exist for the
    current branch
-2. Then run \`boons pull\` to fetch them into \`.boons/<branch>/\`
+2. Then run \`boons pull\` to fetch them for the current branch
 3. After pulling, use the boons-session-load guidance to read them
 
 ## Default behavior
@@ -1081,9 +1066,10 @@ function taskSkillContent(): string {
   return `---
 name: boons-task
 description: >
-  Project task runner. Always check \`boons task --list\` before running any
+  Project task runner. Always check \`boons task list\` before running any
   project command (install, build, test, deploy, etc.). Use \`boons task <name>\`
-  instead of running commands directly. Save discovered commands as scripts.
+  instead of running commands directly. Auto-create task scripts for repeatable
+  commands, extract env vars, and update scripts on failure.
 ---
 
 ## When to load this skill
@@ -1094,7 +1080,7 @@ Load this skill whenever you are about to run any project-level command:
 
 ## What this does
 
-Manages per-project task scripts at \`~/.config/boons/projects/<repo-key>/scripts/\`.
+Manages per-project task scripts at \`~/.boons/tasks/<repo-key>/scripts/\`.
 Scripts are shell scripts that survive agent sessions — useful when usage caps
 interrupt work mid-task.
 
@@ -1105,37 +1091,144 @@ interrupt work mid-task.
 | \`boons task\` | Run \`setup.sh\` silently; log to \`.logs/setup.log\` |
 | \`boons task <name>\` | Run \`<name>.sh\` silently; log to \`.logs/<name>.log\` |
 | \`boons task <name> --verbose\` | Run with live terminal output |
-| \`boons task read <name>\` | Print task output (excluding status header) |
-| \`boons task read <name> --status\` | Print exit code (0 = success) |
-| \`boons task --list\` | List available scripts with descriptions |
-| \`boons task --check\` | Print script content without executing |
-| \`boons task --path\` | Print scripts directory path |
-| \`boons task --env\` | Open/create \`.env\` in \$EDITOR |
+| \`boons task <name> -- --arg1 arg2\` | Pass args after \`--\` through to the script |
+| \`boons task list\` | List available scripts with descriptions |
+| \`boons task check\` | Print script content without executing |
+| \`boons task path\` | Print scripts directory path |
+| \`boons task path --logs\` | Print logs directory path |
+| \`boons task path --log <name>\` | Print log file path for a task |
+| \`boons task path <name>\` | Print script file path for a task |
+| \`boons task read <name>\` | ⚠ Full output — prefer path+grep (see Inspection) |
+| \`boons task read <name> --status\` | Print exit code (0 = success) — cheap |
+| \`boons task create <name> --file <path>\` | Create a task script from a file |
+| \`boons task create <name> --command "<cmd>"\` | Create from a one-liner command |
+| \`boons task create <name> --file <path> --force\` | Overwrite existing script |
+| \`boons task update <name> --command "<cmd>"\` | Update script body, keep description |
+| \`boons task env\` | Open/create \`.env\` in \$EDITOR |
+| \`boons task env set KEY=VALUE [...]\` | Set environment variables |
+| \`boons task env get <KEY>\` | Print a single env var |
+| \`boons task env list\` | List all env vars |
 
-## Protocol
+## Rules — you MUST follow these
 
-1. **Before running any project command** → run \`boons task --list\` first
-2. **If a matching script exists** → use \`boons task <name>\` instead
-3. **If no matching script** → run the command directly, then save it as a task script
-4. **After running** → check status with \`boons task read <name> --status\`
-5. **If the command changes** → update the script
+### 1. Always check first
 
-## When to create task scripts
+Before running any project-level command (\`npm install\`, \`bun test\`, \`cargo build\`, etc.):
+**run \`boons task list\` first.** If a matching script exists, use
+\`boons task <name>\` — do not run the raw command.
 
-Write a new script when you discover a repeatable project command:
+### 2. Auto-create immediately
 
-- **Setup**: package install, git hooks, env file init → \`setup.sh\`
-- **Build**: compile, bundle, typecheck → \`build.sh\`
-- **Test**: unit tests, integration tests, linting → \`test.sh\`
-- **Deploy**: deploy to staging/production → \`deploy.sh\`
-- **Seed**: database migrations, test data → \`seed.sh\`
-- **Dev**: run dev server, watch mode → \`dev.sh\`
+After running a matching command from the table below, **you MUST immediately
+create a task script** using \`boons task create\`. Do not move on without doing this.
 
-Don't write scripts for one-off commands (ephemeral debugging, single
-investigations). Only save commands that someone (including a future you)
-would need to run again.
+| If you ran... | Create with... |
+|---|---|
+| \`npm install\`, \`bun install\`, \`pip install\`, \`uv sync\`, \`poetry install\`, \`cargo build\` (first run) | \`boons task create setup --command "<cmd>"\` |
+| \`npm run build\`, \`bun run build\`, \`cargo build\`, \`go build\`, \`make\` | \`boons task create build --command "<cmd>"\` |
+| \`npm test\`, \`bun test\`, \`pytest\`, \`cargo test\`, \`go test\`, \`vitest\` | \`boons task create test --command "<cmd>"\` |
+| \`npm run lint\`, \`eslint\`, \`ruff\`, \`biome lint\` | \`boons task create lint --command "<cmd>"\` |
+| \`npm run dev\`, \`bun run dev\`, \`cargo watch\` | \`boons task create dev --command "<cmd>"\` |
+| \`docker compose up\`, \`docker compose down\` | \`boons task create docker --command "<cmd>"\` |
+| Database migration/seed commands | \`boons task create seed --command "<cmd>"\` |
+| Deployment commands | \`boons task create deploy --command "<cmd>"\` |
 
-### Script format
+**Skip auto-create** for one-off commands: \`ls\`, \`cat\`, \`cd\`, \`curl\`,
+\`grep\`, \`find\`, \`echo\`, \`mkdir\`, \`touch\`, \`rm\`, \`git log\`, \`git diff\`,
+\`git status\`, \`git add\`, \`gh\` subcommands, or any command you wouldn't
+run twice.
+
+### 3. How to create
+
+Write the script to a temp file, validate with \`bash -n /tmp/<name>.sh\`,
+then register:
+
+    boons task create <name> --file /tmp/<name>.sh
+
+For one-liners, skip the file:
+
+    boons task create build --command "npm run build"
+
+### 4. Pass args through to scripts
+
+Use \`--\` to pass arguments to the underlying script:
+
+    boons task test -- --grep "test name"
+    boons task dev -- --port 3000
+
+Everything after \`--\` is passed as positional args to the script.
+Boons flags like \`--verbose\` must go before \`--\`.
+
+### 5. Extract env vars from commands
+
+When creating a task, examine the command for values that should be
+configurable rather than hardcoded:
+
+- **Secrets**: API keys, tokens, passwords — extract to \`.env\`, reference as \`$VAR\` in script
+- **Environment-specific URLs**: database URLs, API endpoints, hosts — extract to \`.env\`
+- **Config that varies**: ports, versions, registry URLs, feature flags — extract to \`.env\`
+
+Workflow:
+1. Strip \`KEY=VALUE\` prefixes from the command before saving the script
+2. Replace hardcoded values with \`$VAR\` references in the script body
+3. Register values with \`boons task env set KEY=VALUE\`
+
+Example:
+\`\`\`
+# Instead of saving:
+npm run migrate --database-url postgres://user:pass@localhost:5432/dev
+
+# Save the script with an env var reference:
+npm run migrate --database-url $DATABASE_URL
+
+# And set the value:
+boons task env set DATABASE_URL=postgres://user:pass@localhost:5432/dev
+\`\`\`
+
+### 6. Task fails → fix then update
+
+After every \`boons task <name>\` run, check the exit code first:
+
+    boons task read <name> --status
+
+If non-zero, **grep the log** rather than reading it whole:
+
+    boons task path --log <name>
+    grep "error" <path>
+
+Then debug and fix:
+
+1. Find the corrected command (grep the log above for clues)
+2. Run it directly to confirm it works
+3. **Update the script** so no future agent hits the same failure:
+
+   \`\`\`
+   boons task update <name> --command "<corrected command>"
+   \`\`\`
+
+   This preserves the existing description but replaces the script body.
+
+   If the command is complex, write the corrected version to a temp file and use
+   \`--file\` instead:
+
+   \`\`\`
+   boons task create <name> --file /tmp/<name>.sh --force
+   \`\`\`
+
+Do not leave a broken script. Always update after fixing.
+
+## Non-bash shells
+
+By default, \`--command\` generates \`#!/bin/bash\` scripts. To use a different
+shell (e.g., \`zsh\`):
+
+1. Write the script to a temp file with \`#!/usr/bin/env zsh\`
+2. Validate: \`zsh -n /tmp/<name>.sh\`
+3. Register: \`boons task create <name> --file /tmp/<name>.sh\`
+
+boons detects the shebang and runs the correct interpreter at execution time.
+
+## Script format
 
     #!/bin/bash
     # One-line description shown by --list
@@ -1143,30 +1236,49 @@ would need to run again.
 
     echo "Hello from my task"
 
-- First \`#\` comment after optional shebang is the \`--list\` description
+- First \`#\` comment after the shebang is the \`--list\` description
 - \`set -euo pipefail\` is recommended to fail fast
 - \`.env\` vars are sourced automatically before execution
 
-## When to iterate (update)
+## Security
 
-Update an existing script when:
+- \`.env\` files are written with \`chmod 600\` (owner read/write only)
+- Prefer shell-level env vars (\`$DATABASE_URL\` set in your terminal or
+  \`.zshrc\`) for truly sensitive secrets — \`.env\` is best for non-sensitive
+  config (ports, endpoints, versions)
+- \`boons push\` does not include task scripts or \`.env\` files —
+  only session artifacts
 
-- Package manager changed (npm → pnpm, pip → uv, etc.)
-- Build/test commands changed
-- Environment variables were added or renamed
-- The script failed and you fixed it
+## Inspection — rules to minimize tokens
 
-Overwrite the file in place. The \`--check\` flag lets you review what's
-there before running.
+**NEVER use \`boons task read <name>\`** — it dumps the entire file into context.
+Always prefer path + native tools (grep/read/tail/head) to search output.
 
-## Inspection
+**Check exit code first** — single integer, zero cost:
 
-After running a task, use \`boons task read <name>\` to see output without
-re-executing. Use \`boons task read <name> --status\` to check success
-before deciding whether to read the full log.
+    boons task read <name> --status
 
-Logs live at \`~/.config/boons/projects/<repo-key>/.logs/<name>.log\` with
-a \`# exit: <code>\` header on the first line.
+If exit code is non-zero, **grep the log** (only matching lines → lower tokens):
+
+    boons task path --log <name>
+    grep "error" <path>
+    tail -20 <path>
+
+**To search across all task output:**
+
+    boons task path --logs
+    # Glob or grep the directory.
+
+**To view a script** (prefer \`boons task path <name>\` + read over \`--check\`):
+
+    boons task path <name>
+    # → reads just one file
+
+**To view all scripts** (only when needed):
+
+    boons task check
+
+Log files use a \`# exit: <code>\` header on line 1, then raw stdout+stderr.
 `
 }
 
@@ -1224,7 +1336,7 @@ async function installCodex(projectDir?: string) {
 
 async function cmdRemote(args: Record<string, string>) {
   const cwd = process.cwd()
-  const target = args["--project"] === "true" ? "per-repo" : "global-default"
+  const target = args["--project"] === "true" ? "project" : "global-default"
   const hasProviderFlags = args["--provider"] || args["--bucket"] || args["--account"] || args["--container"]
 
   if (hasProviderFlags) {
@@ -1234,7 +1346,7 @@ async function cmdRemote(args: Record<string, string>) {
     if (args["--account"]) remote.account = args["--account"]
     if (args["--container"]) remote.container = args["--container"]
     if (args["--prefix"]) remote.prefix = args["--prefix"]
-    writeConfigTarget(target, { remote: remote as any }, cwd)
+    writeConfigTarget(target, remote as any, cwd)
     console.log(`Configured remote: ${args["--provider"]}${remote.bucket ? ` (bucket: ${remote.bucket})` : ""}${remote.account ? ` (account: ${remote.account})` : ""}`)
     return
   }
@@ -1250,7 +1362,7 @@ async function cmdRemote(args: Record<string, string>) {
   if (answer.toLowerCase() === "y" || answer.toLowerCase() === "yes") {
     const remote = await askRemoteConfig(true)
     if (remote) {
-      writeConfigTarget(target, { remote }, cwd)
+      writeConfigTarget(target, remote, cwd)
       console.log(`Configured remote: ${remote.provider}${remote.bucket ? ` (bucket: ${remote.bucket})` : ""}${remote.account ? ` (account: ${remote.account})` : ""}`)
     }
   }
@@ -1306,83 +1418,151 @@ async function cmdTask(args: string[]) {
     process.exit(1)
   }
 
-  const opts = parseArgs(args.slice(1))
-  const sub = args[0]
+  const dashDashIdx = args.indexOf("--")
+  const scriptArgs = dashDashIdx >= 0 ? args.slice(dashDashIdx + 1) : []
+  const boonArgs = dashDashIdx >= 0 ? args.slice(0, dashDashIdx) : args
+
+  const opts = parseArgs(boonArgs.slice(1))
+  const sub = boonArgs[0]
   const verbose = opts["--verbose"] === "true"
   const baseDir = opts["--base"] as string | undefined
 
-  if (!sub || sub.startsWith("--")) {
-    // No subcommand — run setup.sh
-    if (sub === "--list") {
-      printScripts(repoKey, baseDir)
-      return
-    }
-    if (sub === "--check") {
-      printCheck(repoKey, baseDir)
-      return
-    }
-    if (sub === "--path") {
-      printPath(repoKey, baseDir)
-      return
-    }
-    if (sub === "--env") {
-      handleEnv(repoKey, baseDir)
-      return
-    }
-    if (sub === "--verbose") {
-      // run setup.sh with verbose
-      const script = getScript(repoKey, "setup", baseDir)
-      if (!script) {
-        console.log("No default task script (setup.sh) found.")
-        return
-      }
-      const result = runScript(repoKey, "setup", { verbose: true, baseDir })
-      if (result.output) console.log(result.output)
-      return
-    }
-    // No flags — run setup.sh
+  if (!sub || sub === "--verbose") {
     const script = getScript(repoKey, "setup", baseDir)
-    if (!script) {
-      console.log("No default task script (setup.sh) found.")
-      return
-    }
-    runScript(repoKey, "setup", { verbose: false, baseDir })
+    if (!script) { console.log("No default task script (setup.sh) found."); return }
+    runScript(repoKey, "setup", { verbose: sub === "--verbose", baseDir })
     return
   }
 
-  if (sub === "read") {
-    const name = args[1]
-    if (!name) {
-      console.error("Usage: boons task read <name> [--status]")
-      process.exit(1)
-    }
-    if (opts["--status"] === "true") {
-      const status = readStatus(repoKey, name, baseDir)
-      if (status === null) {
-        console.log(`No log found for task "${name}".`)
-      } else {
-        console.log(status)
-      }
-      return
-    }
-    const log = readLog(repoKey, name, baseDir)
-    if (log === null) {
-      console.log(`No log found for task "${name}".`)
-      return
-    }
-    process.stdout.write(log)
-    return
-  }
-
-  // Run named script
-  const script = getScript(repoKey, sub, baseDir)
-  if (!script) {
-    console.error(`Task script "${sub}" not found.`)
+  if (sub.startsWith("--")) {
+    console.error(`Unknown flag: ${sub}`)
     process.exit(1)
   }
-  const result = runScript(repoKey, sub, { verbose, baseDir })
-  if (result.output) console.log(result.output)
-  process.exit(result.exitCode)
+
+  // Reserved subcommands that shadow script names
+  const reserved = new Set(["list", "check", "path", "env", "create", "update", "read"])
+  if (!reserved.has(sub)) {
+    const script = getScript(repoKey, sub, baseDir)
+    if (!script) {
+      console.error(`Task script "${sub}" not found.`)
+      process.exit(1)
+    }
+    const result = runScript(repoKey, sub, { verbose, baseDir, args: scriptArgs })
+    if (result.output) console.log(result.output)
+    process.exit(result.exitCode)
+  }
+
+  switch (sub) {
+    case "list":
+      printScripts(repoKey, baseDir)
+      break
+    case "check":
+      printCheck(repoKey, baseDir)
+      break
+    case "path": {
+      if (opts["--logs"] === "true") {
+        console.log(logsDirPath(repoKey, baseDir))
+      } else if (opts["--log"]) {
+        const name = opts["--log"] as string
+        console.log(logFilePath(repoKey, name, baseDir))
+      } else {
+        const name = boonArgs[1]
+        if (name && !name.startsWith("--")) {
+          const script = getScript(repoKey, name, baseDir)
+          if (!script) {
+            console.error(`Task script "${name}" not found.`)
+            process.exit(1)
+          }
+          console.log(script.filePath)
+        } else {
+          printPath(repoKey, baseDir)
+        }
+      }
+      break
+    }
+    case "read": {
+      const name = boonArgs[1]
+      if (!name) {
+        console.error("Usage: boons task read <name> [--status]")
+        process.exit(1)
+      }
+      if (opts["--status"] === "true") {
+        const status = readStatus(repoKey, name, baseDir)
+        if (status === null) console.log(`No log found for task "${name}".`)
+        else console.log(status)
+        return
+      }
+      const log = readLog(repoKey, name, baseDir)
+      if (log === null) console.log(`No log found for task "${name}".`)
+      else process.stdout.write(log)
+      break
+    }
+    case "env": {
+      const envSub = boonArgs[1]
+      if (envSub === "set") {
+        const pairs = boonArgs.slice(2).filter(a => !a.startsWith("--"))
+        if (pairs.length === 0) {
+          console.error("Usage: boons task env set KEY=VALUE [...]")
+          process.exit(1)
+        }
+        for (const pair of pairs) {
+          const eqIdx = pair.indexOf("=")
+          if (eqIdx < 0) {
+            console.error(`Invalid format: "${pair}". Use KEY=VALUE.`)
+            process.exit(1)
+          }
+          setEnvVar(repoKey, pair.slice(0, eqIdx), pair.slice(eqIdx + 1), baseDir)
+        }
+        console.log(`Set ${pairs.length} env var(s).`)
+      } else if (envSub === "get") {
+        const key = boonArgs[2]
+        if (!key) {
+          console.error("Usage: boons task env get <key>")
+          process.exit(1)
+        }
+        const val = getEnvVar(repoKey, key, baseDir)
+        if (val === null) console.log(`${key} not set.`)
+        else console.log(val)
+      } else if (envSub === "list") {
+        listEnvVars(repoKey, baseDir)
+      } else {
+        handleEnv(repoKey, baseDir)
+      }
+      break
+    }
+    case "create":
+    case "update": {
+      const name = boonArgs[1]
+      if (!name) {
+        console.error(`Usage: boons task ${sub} <name> [--file <path>] [--command "<cmd>"] [--force]`)
+        process.exit(1)
+      }
+      const fileVal = opts["--file"]
+      const sourceFile = Array.isArray(fileVal) ? fileVal[0] : fileVal
+      const command = opts["--command"] as string | undefined
+      const force = opts["--force"] === "true" || sub === "update"
+
+      try {
+        let descOverride: string | undefined
+        if (sub === "update" && command && !sourceFile) {
+          const existing = getScript(repoKey, name, baseDir)
+          if (existing && existing.description) descOverride = existing.description
+        }
+        const info = createScript(repoKey, name, {
+          sourceFile,
+          command,
+          description: descOverride,
+          force,
+          baseDir,
+        })
+        console.log(`${sub === "update" ? "Updated" : "Created"} task script "${info.name}": ${info.description}`)
+      } catch (err) {
+        console.error((err as Error).message)
+        process.exit(1)
+      }
+      break
+    }
+  }
 }
 
 function parseArgs(args: string[]): Record<string, string | string[]> {

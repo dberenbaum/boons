@@ -1,6 +1,6 @@
 ---
 name: boons-session-push
-description: Ask to share after auto-save, before git push, or before PR review. Push .boons/ to cloud. Always ask user.
+description: Ask to share after auto-save, before git push, or before PR review. Push sessions to cloud. Always ask user.
 ---
 
 ## What this does

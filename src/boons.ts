@@ -146,7 +146,7 @@ Usage:
    boons remote --project --provider aws|gcp|azure ...   Configure cloud remote per-repo (stored in global config)
   boons push [--session-id <id>] [--branch <b>]         Push sessions to cloud
    boons pull [--session-id <id>] [--branch <b>]         Pull sessions from cloud
-    boons task [<name>] [--verbose]                     Run a task script (default: setup.sh)
+    boons task [<name>] [--verbose] [-- <args>...]      Run a task script (default: setup.sh); pass args after --
     boons task list                                      List available task scripts
     boons task check                                     Print task scripts without running
     boons task path                                      Print task scripts directory
@@ -1088,6 +1088,7 @@ interrupt work mid-task.
 | \`boons task\` | Run \`setup.sh\` silently; log to \`.logs/setup.log\` |
 | \`boons task <name>\` | Run \`<name>.sh\` silently; log to \`.logs/<name>.log\` |
 | \`boons task <name> --verbose\` | Run with live terminal output |
+| \`boons task <name> -- --arg1 arg2\` | Pass args after \`--\` through to the script |
 | \`boons task list\` | List available scripts with descriptions |
 | \`boons task check\` | Print script content without executing |
 | \`boons task path\` | Print scripts directory path |
@@ -1142,7 +1143,17 @@ For one-liners, skip the file:
 
     boons task create build --command "npm run build"
 
-### 4. Extract env vars from commands
+### 4. Pass args through to scripts
+
+Use \`--\` to pass arguments to the underlying script:
+
+    boons task test -- --grep "test name"
+    boons task dev -- --port 3000
+
+Everything after \`--\` is passed as positional args to the script.
+Boons flags like \`--verbose\` must go before \`--\`.
+
+### 5. Extract env vars from commands
 
 When creating a task, examine the command for values that should be
 configurable rather than hardcoded:
@@ -1168,7 +1179,7 @@ npm run migrate --database-url $DATABASE_URL
 boons task env set DATABASE_URL=postgres://user:pass@localhost:5432/dev
 \`\`\`
 
-### 5. Task fails → fix then update
+### 6. Task fails → fix then update
 
 After every \`boons task <name>\` run, check \`boons task read <name> --status\`.
 If the exit code is non-zero:
@@ -1372,8 +1383,12 @@ async function cmdTask(args: string[]) {
     process.exit(1)
   }
 
-  const opts = parseArgs(args.slice(1))
-  const sub = args[0]
+  const dashDashIdx = args.indexOf("--")
+  const scriptArgs = dashDashIdx >= 0 ? args.slice(dashDashIdx + 1) : []
+  const boonArgs = dashDashIdx >= 0 ? args.slice(0, dashDashIdx) : args
+
+  const opts = parseArgs(boonArgs.slice(1))
+  const sub = boonArgs[0]
   const verbose = opts["--verbose"] === "true"
   const baseDir = opts["--base"] as string | undefined
 
@@ -1397,7 +1412,7 @@ async function cmdTask(args: string[]) {
       console.error(`Task script "${sub}" not found.`)
       process.exit(1)
     }
-    const result = runScript(repoKey, sub, { verbose, baseDir })
+    const result = runScript(repoKey, sub, { verbose, baseDir, args: scriptArgs })
     if (result.output) console.log(result.output)
     process.exit(result.exitCode)
   }
@@ -1413,7 +1428,7 @@ async function cmdTask(args: string[]) {
       printPath(repoKey, baseDir)
       break
     case "read": {
-      const name = args[1]
+      const name = boonArgs[1]
       if (!name) {
         console.error("Usage: boons task read <name> [--status]")
         process.exit(1)
@@ -1430,9 +1445,9 @@ async function cmdTask(args: string[]) {
       break
     }
     case "env": {
-      const envSub = args[1]
+      const envSub = boonArgs[1]
       if (envSub === "set") {
-        const pairs = args.slice(2).filter(a => !a.startsWith("--"))
+        const pairs = boonArgs.slice(2).filter(a => !a.startsWith("--"))
         if (pairs.length === 0) {
           console.error("Usage: boons task env set KEY=VALUE [...]")
           process.exit(1)
@@ -1447,7 +1462,7 @@ async function cmdTask(args: string[]) {
         }
         console.log(`Set ${pairs.length} env var(s).`)
       } else if (envSub === "get") {
-        const key = args[2]
+        const key = boonArgs[2]
         if (!key) {
           console.error("Usage: boons task env get <key>")
           process.exit(1)
@@ -1464,7 +1479,7 @@ async function cmdTask(args: string[]) {
     }
     case "create":
     case "update": {
-      const name = args[1]
+      const name = boonArgs[1]
       if (!name) {
         console.error(`Usage: boons task ${sub} <name> [--file <path>] [--command "<cmd>"] [--force]`)
         process.exit(1)

@@ -184,7 +184,7 @@ export function readStatus(repoKey: string, name: string, baseDir?: string): num
 export function runScript(
   repoKey: string,
   name: string,
-  opts?: { verbose?: boolean; baseDir?: string },
+  opts?: { verbose?: boolean; args?: string[]; baseDir?: string },
 ): RunResult {
   const script = getScript(repoKey, name, opts?.baseDir)
   if (!script) {
@@ -221,7 +221,7 @@ export function runScript(
     else if (interp === "bash") shell = "/bin/bash"
   } catch { /* use default /bin/bash */ }
 
-  const result = Bun.spawnSync([shell, script.filePath], {
+  const result = Bun.spawnSync([shell, script.filePath, ...(opts?.args || [])], {
     env,
     cwd: process.cwd(),
   })

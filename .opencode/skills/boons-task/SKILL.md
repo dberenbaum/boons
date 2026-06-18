@@ -40,22 +40,20 @@ interrupt work mid-task.
 | `boons task env get <KEY>` | Print a single env var |
 | `boons task env list` | List all env vars |
 
-Old-style flags (`--list`, `--check`, `--path`, `--env`) also work.
+## Rules — you MUST follow these
 
-## Protocol — follow this strictly
+### 1. Always check first
 
-### 1. Before every project command
+Before running any project-level command (`npm install`, `bun test`, `cargo build`, etc.):
+**run `boons task list` first.** If a matching script exists, use
+`boons task <name>` — do not run the raw command.
 
-Run `boons task list` first. If a matching script exists, use
-`boons task <name>` instead of running the command directly.
+### 2. Auto-create immediately
 
-### 2. No script exists → run directly, then auto-create
+After running a matching command from the table below, **you MUST immediately
+create a task script** using `boons task create`. Do not move on without doing this.
 
-After running any project command listed in the table below,
-**immediately** create a task script. Do not ask the user — do this
-automatically.
-
-| You ran... | Create with... |
+| If you ran... | Create with... |
 |---|---|
 | `npm install`, `bun install`, `pip install`, `uv sync`, `poetry install`, `cargo build` (first run) | `boons task create setup --command "<cmd>"` |
 | `npm run build`, `bun run build`, `cargo build`, `go build`, `make` | `boons task create build --command "<cmd>"` |
@@ -66,19 +64,21 @@ automatically.
 | Database migration/seed commands | `boons task create seed --command "<cmd>"` |
 | Deployment commands | `boons task create deploy --command "<cmd>"` |
 
-**Do not auto-create** for one-off commands: `ls`, `cat`, `cd`, `curl`,
+**Skip auto-create** for one-off commands: `ls`, `cat`, `cd`, `curl`,
 `grep`, `find`, `echo`, `mkdir`, `touch`, `rm`, `git log`, `git diff`,
 `git status`, `git add`, `gh` subcommands, or any command you wouldn't
 run twice.
 
-### 3. Creative workflow
+### 3. How to create
 
-1. Write the script content to a temp file
-2. Validate with `bash -n /tmp/<name>.sh` (or `zsh -n` if you used a zsh shebang)
-3. Register with `boons task create <name> --file /tmp/<name>.sh`
+Write the script to a temp file, validate with `bash -n /tmp/<name>.sh`,
+then register:
 
-For simple one-liners, skip the temp file and use `--command`:
-`boons task create build --command "npm run build"` (always generates a bash script).
+    boons task create <name> --file /tmp/<name>.sh
+
+For one-liners, skip the file:
+
+    boons task create build --command "npm run build"
 
 ### 4. Extract env vars from commands
 

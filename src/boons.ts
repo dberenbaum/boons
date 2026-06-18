@@ -1098,8 +1098,8 @@ interrupt work mid-task.
 | \`boons task path --logs\` | Print logs directory path |
 | \`boons task path --log <name>\` | Print log file path for a task |
 | \`boons task path <name>\` | Print script file path for a task |
-| \`boons task read <name>\` | Print task output (excluding status header) |
-| \`boons task read <name> --status\` | Print exit code (0 = success) |
+| \`boons task read <name>\` | ⚠ Full output — prefer path+grep (see Inspection) |
+| \`boons task read <name> --status\` | Print exit code (0 = success) — cheap |
 | \`boons task create <name> --file <path>\` | Create a task script from a file |
 | \`boons task create <name> --command "<cmd>"\` | Create from a one-liner command |
 | \`boons task create <name> --file <path> --force\` | Overwrite existing script |
@@ -1187,13 +1187,20 @@ boons task env set DATABASE_URL=postgres://user:pass@localhost:5432/dev
 
 ### 6. Task fails → fix then update
 
-After every \`boons task <name>\` run, check \`boons task read <name> --status\`.
-If the exit code is non-zero:
+After every \`boons task <name>\` run, check the exit code first:
 
-1. Debug the issue
-2. Find the corrected command
-3. Run it directly to confirm it works
-4. **Update the script** so no future agent hits the same failure:
+    boons task read <name> --status
+
+If non-zero, **grep the log** rather than reading it whole:
+
+    boons task path --log <name>
+    grep "error" <path>
+
+Then debug and fix:
+
+1. Find the corrected command (grep the log above for clues)
+2. Run it directly to confirm it works
+3. **Update the script** so no future agent hits the same failure:
 
    \`\`\`
    boons task update <name> --command "<corrected command>"
@@ -1242,33 +1249,30 @@ boons detects the shebang and runs the correct interpreter at execution time.
 - \`boons push\` does not include task scripts or \`.env\` files —
   only session artifacts
 
-## Inspection — minimize tokens
+## Inspection — rules to minimize tokens
+
+**NEVER use \`boons task read <name>\`** — it dumps the entire file into context.
+Always prefer path + native tools (grep/read/tail/head) to search output.
 
 **Check exit code first** — single integer, zero cost:
 
     boons task read <name> --status
 
-**To search output**, get the file path then use native grep/read tools:
+If exit code is non-zero, **grep the log** (only matching lines → lower tokens):
 
     boons task path --log <name>
-    # → ~/.boons/tasks/<repo-key>/.logs/<name>.log
-
-    # Then grep for what you need (only matching lines → lower tokens):
     grep "error" <path>
     tail -20 <path>
-    head -20 <path>
 
 **To search across all task output:**
 
     boons task path --logs
-    # → ~/.boons/tasks/<repo-key>/.logs/
     # Glob or grep the directory.
 
-**To view a script** without running \`boons task check\` (which prints ALL scripts):
+**To view a script** (prefer \`boons task path <name>\` + read over \`--check\`):
 
     boons task path <name>
-    # → ~/.boons/tasks/<repo-key>/scripts/<name>.sh
-    # Then read just that file.
+    # → reads just one file
 
 **To view all scripts** (only when needed):
 

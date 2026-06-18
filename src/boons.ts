@@ -159,7 +159,6 @@ Usage:
     boons task env set <KEY=VALUE> [...]                 Set environment variables
     boons task env get <KEY>                             Get an environment variable
     boons task env list                                  List all environment variables
-    (old-style --list/--check/--path/--env still work)
    boons --help                                          Show this message
 
 Remote flags:
@@ -1391,25 +1390,16 @@ async function cmdTask(args: string[]) {
   const verbose = opts["--verbose"] === "true"
   const baseDir = opts["--base"] as string | undefined
 
-  // Old-style flags (keep as undocumented aliases)
-  if (sub === "--list") { printScripts(repoKey, baseDir); return }
-  if (sub === "--check") { printCheck(repoKey, baseDir); return }
-  if (sub === "--path") { printPath(repoKey, baseDir); return }
-  if (sub === "--env") { handleEnv(repoKey, baseDir); return }
-  if (sub === "--verbose") {
+  if (!sub || sub === "--verbose") {
     const script = getScript(repoKey, "setup", baseDir)
     if (!script) { console.log("No default task script (setup.sh) found."); return }
-    const result = runScript(repoKey, "setup", { verbose: true, baseDir })
-    if (result.output) console.log(result.output)
+    runScript(repoKey, "setup", { verbose: sub === "--verbose", baseDir })
     return
   }
 
-  // No sub or flag-style with no recognized flag — run setup.sh
-  if (!sub || sub.startsWith("--")) {
-    const script = getScript(repoKey, "setup", baseDir)
-    if (!script) { console.log("No default task script (setup.sh) found."); return }
-    runScript(repoKey, "setup", { verbose: false, baseDir })
-    return
+  if (sub.startsWith("--")) {
+    console.error(`Unknown flag: ${sub}`)
+    process.exit(1)
   }
 
   // Reserved subcommands that shadow script names

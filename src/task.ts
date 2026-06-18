@@ -30,6 +30,10 @@ export function logFilePath(repoKey: string, name: string, baseDir?: string): st
   return path.join(projectDir(repoKey, baseDir), ".logs", `${name}.log`)
 }
 
+export function logsDirPath(repoKey: string, baseDir?: string): string {
+  return path.join(projectDir(repoKey, baseDir), ".logs")
+}
+
 export function envFilePath(repoKey: string, baseDir?: string): string {
   return path.join(projectDir(repoKey, baseDir), ".env")
 }

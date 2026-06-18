@@ -36,21 +36,21 @@ import {
   getSessionsBranchDir,
 } from "./cloud"
 import {
-  runScript,
-  readLog,
-  readStatus,
   listScripts,
   getScript,
-  createScript,
+  runScript,
   printScripts,
   printCheck,
   printPath,
-  handleEnv,
+  readLog,
+  readStatus,
+  createScript,
   setEnvVar,
   getEnvVar,
   listEnvVars,
-  scriptsDirPath,
   logFilePath,
+  logsDirPath,
+  handleEnv,
 } from "./task"
 
 let pipedAnswers: string[] | null | undefined
@@ -149,7 +149,10 @@ Usage:
     boons task [<name>] [--verbose] [-- <args>...]      Run a task script (default: setup.sh); pass args after --
     boons task list                                      List available task scripts
     boons task check                                     Print task scripts without running
-    boons task path                                      Print task scripts directory
+    boons task path                                      Print scripts directory path
+    boons task path --logs                               Print logs directory path
+    boons task path --log <name>                         Print log file path for a task
+    boons task path <name>                               Print script file path for a task
     boons task read <name> [--status]                    Read task output or exit status
     boons task create <name> [--file <path>]             Create a task script from file or command
                      [--command "<cmd>"] [--force]
@@ -1092,6 +1095,9 @@ interrupt work mid-task.
 | \`boons task list\` | List available scripts with descriptions |
 | \`boons task check\` | Print script content without executing |
 | \`boons task path\` | Print scripts directory path |
+| \`boons task path --logs\` | Print logs directory path |
+| \`boons task path --log <name>\` | Print log file path for a task |
+| \`boons task path <name>\` | Print script file path for a task |
 | \`boons task read <name>\` | Print task output (excluding status header) |
 | \`boons task read <name> --status\` | Print exit code (0 = success) |
 | \`boons task create <name> --file <path>\` | Create a task script from a file |
@@ -1236,14 +1242,39 @@ boons detects the shebang and runs the correct interpreter at execution time.
 - \`boons push\` does not include task scripts or \`.env\` files —
   only session artifacts
 
-## Inspection
+## Inspection — minimize tokens
 
-After running a task, use \`boons task read <name>\` to see output without
-re-executing. Use \`boons task read <name> --status\` to check success
-before deciding whether to read the full log.
+**Check exit code first** — single integer, zero cost:
 
-Logs live at \`~/.boons/tasks/<repo-key>/.logs/<name>.log\` with
-a \`# exit: <code>\` header on the first line.
+    boons task read <name> --status
+
+**To search output**, get the file path then use native grep/read tools:
+
+    boons task path --log <name>
+    # → ~/.boons/tasks/<repo-key>/.logs/<name>.log
+
+    # Then grep for what you need (only matching lines → lower tokens):
+    grep "error" <path>
+    tail -20 <path>
+    head -20 <path>
+
+**To search across all task output:**
+
+    boons task path --logs
+    # → ~/.boons/tasks/<repo-key>/.logs/
+    # Glob or grep the directory.
+
+**To view a script** without running \`boons task check\` (which prints ALL scripts):
+
+    boons task path <name>
+    # → ~/.boons/tasks/<repo-key>/scripts/<name>.sh
+    # Then read just that file.
+
+**To view all scripts** (only when needed):
+
+    boons task check
+
+Log files use a \`# exit: <code>\` header on line 1, then raw stdout+stderr.
 `
 }
 
@@ -1424,9 +1455,27 @@ async function cmdTask(args: string[]) {
     case "check":
       printCheck(repoKey, baseDir)
       break
-    case "path":
-      printPath(repoKey, baseDir)
+    case "path": {
+      if (opts["--logs"] === "true") {
+        console.log(logsDirPath(repoKey, baseDir))
+      } else if (opts["--log"]) {
+        const name = opts["--log"] as string
+        console.log(logFilePath(repoKey, name, baseDir))
+      } else {
+        const name = boonArgs[1]
+        if (name && !name.startsWith("--")) {
+          const script = getScript(repoKey, name, baseDir)
+          if (!script) {
+            console.error(`Task script "${name}" not found.`)
+            process.exit(1)
+          }
+          console.log(script.filePath)
+        } else {
+          printPath(repoKey, baseDir)
+        }
+      }
       break
+    }
     case "read": {
       const name = boonArgs[1]
       if (!name) {

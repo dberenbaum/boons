@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO="https://github.com/dberenbaum/boons.git"
-INSTALL_DIR="${BOONS_DIR:-$HOME/.boons}"
+INSTALL_DIR="${BOONS_DIR:-$HOME/.local/share/boons}"
 
 echo "==> Installing boons..."
 

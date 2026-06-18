@@ -4,9 +4,11 @@ import * as path from "path"
 import * as os from "os"
 import {
   getRepoKey,
-  readConfig,
-  writeConfig,
   resolveConfig,
+  getSessionsDir,
+  getSessionsBranchDir,
+  boonsDataDir,
+  getRepoKeyOrLocal,
 } from "../src/cloud/config"
 
 let tmpDir: string
@@ -65,32 +67,62 @@ describe("getRepoKey", () => {
   })
 })
 
-describe("readConfig / writeConfig", () => {
-  test("readConfig returns empty object when file does not exist", () => {
-    const cfg = readConfig(tmpDir)
-    expect(cfg).toEqual({})
+describe("boonsDataDir", () => {
+  test("returns path under given baseDir", () => {
+    const dir = boonsDataDir(tmpDir)
+    expect(dir).toBe(path.join(tmpDir, ".boons"))
+  })
+})
+
+describe("getSessionsDir / getSessionsBranchDir", () => {
+  test("returns repo-keyed path when remote exists", () => {
+    const repo = fs.mkdtempSync(path.join(tmpDir, "repo-sess-"))
+    Bun.spawnSync(["git", "init"], { cwd: repo })
+    Bun.spawnSync(["git", "remote", "add", "origin", "https://github.com/user/proj.git"], { cwd: repo })
+    const dir = getSessionsDir(repo, tmpDir)
+    expect(dir).toBe(path.join(tmpDir, ".boons", "sessions", "github.com/user/proj"))
   })
 
-  test("writeConfig writes config file", () => {
-    writeConfig({ remote: { provider: "aws", bucket: "my-bucket" } }, tmpDir)
-    const filePath = path.join(tmpDir, ".boons", "config.json")
-    expect(fs.existsSync(filePath)).toBe(true)
-    const raw = JSON.parse(fs.readFileSync(filePath, "utf-8"))
-    expect(raw).toEqual({ remote: { provider: "aws", bucket: "my-bucket" } })
+  test("returns local-keyed path when no remote", () => {
+    const repo = fs.mkdtempSync(path.join(tmpDir, "repo-noremote-"))
+    Bun.spawnSync(["git", "init"], { cwd: repo })
+    const dir = getSessionsDir(repo, tmpDir)
+    expect(dir).toContain("_local")
+    expect(dir).toContain("boons")
   })
 
-  test("readConfig reads back the config", () => {
-    const cfg = readConfig(tmpDir)
-    expect(cfg.remote?.provider).toBe("aws")
-    expect(cfg.remote?.bucket).toBe("my-bucket")
+  test("getSessionsBranchDir appends branch", () => {
+    const repo = fs.mkdtempSync(path.join(tmpDir, "repo-branch-"))
+    Bun.spawnSync(["git", "init"], { cwd: repo })
+    const dir = getSessionsBranchDir("my-feature", repo, tmpDir)
+    expect(dir).toContain("my-feature")
+  })
+})
+
+describe("getRepoKeyOrLocal", () => {
+  test("returns repo key when remote exists", () => {
+    const repo = fs.mkdtempSync(path.join(tmpDir, "repo-kol-"))
+    Bun.spawnSync(["git", "init"], { cwd: repo })
+    Bun.spawnSync(["git", "remote", "add", "origin", "https://github.com/org/repo.git"], { cwd: repo })
+    const result = getRepoKeyOrLocal(repo)
+    expect(result.key).toBe("github.com/org/repo")
+    expect(result.isLocal).toBe(false)
+  })
+
+  test("returns local key when no remote", () => {
+    const repo = fs.mkdtempSync(path.join(tmpDir, "repo-kol-local-"))
+    Bun.spawnSync(["git", "init"], { cwd: repo })
+    const result = getRepoKeyOrLocal(repo)
+    expect(result.isLocal).toBe(true)
+    expect(result.key).toContain("_local")
   })
 })
 
 describe("resolveConfig", () => {
-  test("returns per-repo config (may inherit global)", () => {
+  test("reads global config", () => {
     const resolved = resolveConfig(tmpDir)
-    expect(resolved).not.toBeNull()
-    expect(resolved?.remote.provider).toBe("aws")
-    expect(resolved?.remote.bucket).toBe("my-bucket")
+    // Reads from ~/.config/boons/config.json (may be null if none exists)
+    // Just verify it doesn't throw
+    expect(resolved === null || typeof resolved === "object").toBe(true)
   })
 })

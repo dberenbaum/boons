@@ -31,6 +31,7 @@ import {
   resolveActiveSessionID as resolveCodexSessionID,
 } from "./codex"
 import { getBranch, getAuthor } from "./git"
+import { getSessionsBranchDir } from "./cloud/config"
 
 const knownTools = ["opencode", "claude-code", "cursor", "codex"] as const
 export type Tool = (typeof knownTools)[number]
@@ -98,7 +99,7 @@ export async function exportSession(opts: ExportOptions): Promise<ExportResult> 
     ])
   }
 
-  const sessionDir = path.join(cwd, ".boons", branch, sessionID)
+  const sessionDir = path.join(getSessionsBranchDir(branch, cwd), sessionID)
   fs.mkdirSync(sessionDir, { recursive: true })
 
   if (opts.tool === "claude-code") {

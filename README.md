@@ -32,7 +32,7 @@ The team benefit is the same context, shared:
 Project commands (setup, build, test, deploy) are saved as cross-tool shell scripts. The next agent — same tool or different — runs `boons task --list` and has the project's full operational knowledge. Usage caps and mid-task agent switches become frictionless: commands don't reset when the session does.
 
 - **Cross-tool** — Shell scripts aren't tied to any AI tool. OpenCode, Claude Code, Cursor, and Codex all use the same `boons task` CLI.
-- **Machine-local** — Stored in `~/.config/boons/projects/<repo-key>/scripts/`, never pushed to git or cloud. Secrets stay on your machine via `.env` files.
+- **Machine-local** — Stored in `~/.boons/tasks/<repo-key>/scripts/`, never pushed to git or cloud. Secrets stay on your machine via `.env` files.
 - **Inspectable** — Output is written to disk. Read it with `boons task read <name>` or `boons task read <name> --status` to check exit codes without reading full output.
 
 ## How It Works
@@ -41,7 +41,7 @@ Boons has two storage backends, one for each problem it solves:
 
 ### Session storage (context)
 
-Every session on a branch is saved into `.boons/<branch>/<session-id>/`, a gitignored directory containing:
+Every session on a branch is saved into `~/.boons/sessions/<repo-key>/<branch>/<session-id>/`, keyed by your git remote origin:
 
 - `raw.jsonl` — complete message history (append-only, never modified)
 - `info.json` — metadata (tool, author, branch, timestamps)
@@ -59,7 +59,7 @@ add other documents as needed.
 
 ### Task script storage (capability)
 
-Project commands live outside the repo in `~/.config/boons/projects/<repo-key>/scripts/`, keyed by
+Project commands live outside the repo in `~/.boons/tasks/<repo-key>/scripts/`, keyed by
 your git remote origin. Each script is a shell file with a one-line description:
 
 - `setup.sh` — default task, run with `boons task`
@@ -138,10 +138,10 @@ append-only and may produce artifacts across multiple files (plans, summaries, e
 the meaningful unit of work. Task scripts are the opposite — overwritten when commands change,
 reflecting that operational knowledge is always current-state.
 
-**Separate storage per problem.** Context (.boons/) lives in the repo, gitignored, and is optionally
-pushed to cloud for sharing. Capability (~/.config/boons/projects/) lives on the machine,
-spanning all repos and tools — because how to build the project is independent of any single session
-or tool.
+**Separate storage per problem.** Context lives in `~/.boons/sessions/`, keyed by git
+remote, and is optionally pushed to cloud for sharing. Capability lives in
+`~/.boons/tasks/`, spanning all repos and tools — because how to build the project is
+independent of any single session or tool.
 
 ## Supported Tools
 
@@ -156,11 +156,10 @@ All tools share the same `boons task` project scripts — shell scripts, not too
 
 ## Configuration
 
-Config is resolved from three sources in order, each inheriting and overriding the previous:
+Config is resolved from two sources in order, each inheriting and overriding the previous:
 
-1. Global default (`~/.config/boons/config.json`)
-2. Repo-keyed global (`~/.config/boons/config.json` → `repos.<key>`)
-3. Per-repo (`.boons/config.json`)
+1. Global default (`~/.boons/config.json`)
+2. Repo-keyed (`~/.boons/config.json` → `repos.<key>`)
 
 The repo key is derived from `git remote origin`, normalized to `host/org/repo`. Remote objects are stored at `{prefix}/{repoKey}/{branch}/{sessionID}/`.
 
@@ -168,14 +167,14 @@ The repo key is derived from `git remote origin`, normalized to `host/org/repo`.
 
 ```
 boons session-save --tool <name> [--session-id <id>] [--summary <text>]
-                                                  Save session to .boons/
-boons ls [--branch <name>]                        List local sessions
+                                                  Save session for current branch
+boons ls [--branch <name>]                        List saved sessions
 boons ls --remote [--branch <name>]                List remote sessions
-boons install <tool>                               Install skills for a tool (+ global .gitignore + global rules)
-boons install <tool> --project                     Install skills scoped to the project (+ project .gitignore + project rules)
+boons install <tool>                               Install skills for a tool (+ global rules)
+boons install <tool> --project                     Install skills scoped to the project (+ project rules)
 boons remote                                       Show remote config, or prompt if none
 boons remote --provider aws|gcp|azure ...           Configure remote
-boons remote --project --provider aws|gcp|azure    Configure remote per-project
+boons remote --project --provider aws|gcp|azure    Configure remote per-repo (stored in global config)
 boons push [--session-id <id>] [--branch <b>]      Push sessions to cloud
 boons pull [--session-id <id>] [--branch <b>]      Pull from cloud
 boons task [<name>] [--verbose]                    Run a task script (default: setup.sh)

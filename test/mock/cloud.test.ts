@@ -57,6 +57,12 @@ class MockListProvider implements CloudStorage {
 // ─── Mocks ─────────────────────────────────────────────────────
 
 let useListProvider = false
+let pushTmpDir = ""
+
+const mockGetSessionsBranchDir = (branch: string) => {
+  if (pushTmpDir) return path.join(pushTmpDir, "sessions", branch)
+  return path.join("/tmp", "boons-sessions", branch)
+}
 
 mock.module("../../src/cloud/config", () => ({
   resolveConfig: () => ({
@@ -68,6 +74,13 @@ mock.module("../../src/cloud/config", () => ({
     source: "test",
   }),
   getRepoKey: () => "github.com/org/repo",
+  getSessionsDir: () => pushTmpDir ? path.join(pushTmpDir, "sessions") : "/tmp/boons-sessions",
+  getSessionsBranchDir: (branch: string) => mockGetSessionsBranchDir(branch),
+  boonsDataDir: () => pushTmpDir ? path.join(pushTmpDir, "boons") : "/tmp/boons",
+  getRepoKeyOrLocal: () => ({ key: "github.com/org/repo", isLocal: false }),
+  readGlobalConfig: () => ({}),
+  writeGlobalConfig: () => {},
+  globalConfigPath: () => "/tmp/config.json",
 }))
 
 mock.module("../../src/git", () => ({
@@ -94,19 +107,22 @@ describe("push", () => {
   beforeAll(() => {
     useListProvider = false
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "boons-push-test-"))
-    fs.mkdirSync(path.join(tmpDir, ".boons", "feature-test", "sess-1"), { recursive: true })
-    fs.mkdirSync(path.join(tmpDir, ".boons", "feature-test", "sess-2"), { recursive: true })
+    pushTmpDir = tmpDir
+    const sessionsDir = mockGetSessionsBranchDir("feature-test")
+    fs.mkdirSync(path.join(sessionsDir, "sess-1"), { recursive: true })
+    fs.mkdirSync(path.join(sessionsDir, "sess-2"), { recursive: true })
     fs.writeFileSync(
-      path.join(tmpDir, ".boons", "feature-test", "sess-1", "info.json"),
+      path.join(sessionsDir, "sess-1", "info.json"),
       JSON.stringify({ name: "Session 1" }),
     )
     fs.writeFileSync(
-      path.join(tmpDir, ".boons", "feature-test", "sess-2", "info.json"),
+      path.join(sessionsDir, "sess-2", "info.json"),
       JSON.stringify({ name: "Session 2" }),
     )
   })
 
   afterAll(() => {
+    pushTmpDir = ""
     fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 
@@ -129,8 +145,9 @@ describe("push", () => {
 
   test("throws when no sessions found", async () => {
     const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), "boons-empty-"))
-    fs.mkdirSync(path.join(emptyDir, ".boons", "feature-test"), { recursive: true })
+    pushTmpDir = emptyDir
     expect(push({ directory: emptyDir })).rejects.toThrow("No saved sessions found")
+    pushTmpDir = tmpDir
     fs.rmSync(emptyDir, { recursive: true, force: true })
   })
 })
@@ -143,10 +160,11 @@ describe("pull", () => {
   beforeAll(() => {
     useListProvider = false
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "boons-pull-test-"))
-    fs.mkdirSync(path.join(tmpDir, ".boons", "feature-test"), { recursive: true })
+    pushTmpDir = tmpDir
   })
 
   afterAll(() => {
+    pushTmpDir = ""
     fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 

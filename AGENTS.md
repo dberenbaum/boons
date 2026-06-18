@@ -1,9 +1,9 @@
 <!-- boons -->
 # boons
 
-Every ~15 tool calls, after modifying files, or when wrapping up a
-task — save the session with `boons session-save --summary "..."`.
-Before committing or switching branches, save first.
+Save sessions after modifying files, after making plans, before
+committing, before switching branches, or every ~15 tool calls.
+Use `boons session-save --summary "..."`.
 
 Before running any project command (install, build, test, deploy, etc.),
 load the boons-task skill and run `boons task --list` to check for an
@@ -14,5 +14,6 @@ Also available: boons-session-load (prior context), boons-session-push (share
 to cloud), boons-session-pull (fetch from cloud), boons-pr-draft (PR
 descriptions), boons-pr-review (PR reviews), boons-task (project task runner).
 <!-- /boons -->
+
 
 

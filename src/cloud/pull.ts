@@ -1,6 +1,6 @@
 import * as path from "path"
 import * as fs from "fs"
-import { resolveConfig, getRepoKey } from "./config"
+import { resolveConfig, getRepoKey, getSessionsBranchDir } from "./config"
 import { createProvider } from "./factory"
 import { getBranch } from "../git"
 
@@ -19,13 +19,16 @@ export interface PullResult {
 export async function pull(opts: PullOptions): Promise<PullResult> {
   const cwd = opts.directory ?? process.cwd()
   const resolved = resolveConfig(cwd)
-  if (!resolved) throw new Error("No remote configured. Run `boons remote --provider <name> --bucket <name>` or set up ~/.config/boons/config.json first.")
+  if (!resolved) throw new Error("No remote configured. Run `boons remote --provider <name> --bucket <name>` or set up ~/.boons/config.json first.")
   const remote = resolved.remote
+
+  const repoKey = getRepoKey(cwd)
+  if (!repoKey) throw new Error("No git remote origin found. Set a remote to pull sessions.")
 
   const provider = createProvider(remote)
   const branch = opts.branch ?? getBranch(cwd)
-  const repoKey = getRepoKey(cwd) ?? ""
   const remoteBase = path.posix.join(...[remote.prefix, repoKey, branch].filter(Boolean))
+  const sessionsBranchDir = getSessionsBranchDir(branch, cwd)
 
   let sessionIDs: string[]
 
@@ -44,7 +47,7 @@ export async function pull(opts: PullOptions): Promise<PullResult> {
   }
 
   for (const sessionID of sessionIDs) {
-    const localDir = path.join(cwd, ".boons", branch, sessionID)
+    const localDir = path.join(sessionsBranchDir, sessionID)
     const remoteDir = path.posix.join(remoteBase, sessionID)
     fs.mkdirSync(localDir, { recursive: true })
     await provider.downloadDir(remoteDir, localDir)

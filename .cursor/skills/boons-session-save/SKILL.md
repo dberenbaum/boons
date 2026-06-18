@@ -16,7 +16,7 @@ Load this skill whenever you are about to or have just done any of the following
 
 ## What this does
 
-Export the current chat session to the `.boons/` artifact directory.
+Export the current chat session for the current branch.
 Each export creates a session directory containing:
 
 - `raw.jsonl` — the complete message history in native format
@@ -31,6 +31,14 @@ Run `boons session-save --tool cursor --summary "..."` **automatically**
 
 - **You modified files** — after writing code that changes multiple files,
   add a commit, or fix a bug. You know work happened; save it.
+- **After planning or exploration** — after researching options,
+  exploring the codebase, or formulating a plan. Write a `plan.md`
+  with intent and next steps and save it via `--file` so a fresh
+  session can pick up execution without re-exploring.
+- **Before large or batch operations** — before making many edits,
+  running long test suites, or generating significant code.
+  Checkpoint first so you can resume if a rate limit or error
+  interrupts mid-operation.
 - **The user expresses satisfaction** — "that works", "looks good", "great",
   "thanks". Treat this as a close signal worth capturing.
 - **Every ~15 tool calls** since the last save — save a checkpoint so the

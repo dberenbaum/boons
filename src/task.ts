@@ -14,8 +14,12 @@ export interface RunResult {
   output: string
 }
 
+function boonsDataDir(baseDir?: string): string {
+  return path.join(baseDir ?? os.homedir(), ".boons")
+}
+
 function projectDir(repoKey: string, baseDir?: string): string {
-  return path.join(baseDir ?? os.homedir(), ".config", "boons", "projects", repoKey)
+  return path.join(boonsDataDir(baseDir), "tasks", repoKey)
 }
 
 export function scriptsDirPath(repoKey: string, baseDir?: string): string {
@@ -30,6 +34,16 @@ export function envFilePath(repoKey: string, baseDir?: string): string {
   return path.join(projectDir(repoKey, baseDir), ".env")
 }
 
+function detectShebang(content: string): string | null {
+  const firstLine = content.split("\n")[0]
+  const m = firstLine?.match(/^#!\s*(\S+)(?:\s+(\S+))?/)
+  if (!m) return null
+  const interp = m[1] === "/usr/bin/env" || m[1] === "/bin/env" || m[1] === "env"
+    ? m[2] || null
+    : path.basename(m[1])
+  return interp
+}
+
 function parseDescription(content: string): string {
   const lines = content.split("\n")
   const start = lines[0]?.startsWith("#!") ? 1 : 0
@@ -41,6 +55,87 @@ function parseDescription(content: string): string {
     if (line.length > 0) break
   }
   return ""
+}
+
+export function createScript(
+  repoKey: string,
+  name: string,
+  opts: {
+    sourceFile?: string
+    command?: string
+    description?: string
+    force?: boolean
+    baseDir?: string
+  },
+): ScriptInfo {
+  const cleanName = name.endsWith(".sh") ? name.slice(0, -3) : name
+  if (!/^[a-zA-Z0-9_-]+$/.test(cleanName)) {
+    throw new Error(`Invalid script name "${name}". Use alphanumeric characters, hyphens, and underscores.`)
+  }
+  const fileName = `${cleanName}.sh`
+
+  let content: string
+  let desc: string
+
+  if (opts.sourceFile && opts.command) {
+    throw new Error("Cannot use both --file and --command. Provide one or the other.")
+  }
+
+  if (opts.sourceFile) {
+    content = fs.readFileSync(opts.sourceFile, "utf-8")
+    const shebang = detectShebang(content)
+    if (!shebang) {
+      throw new Error("Script must have a shebang (e.g. #!/bin/bash)")
+    }
+    const parsedDesc = parseDescription(content)
+    if (!parsedDesc) {
+      throw new Error("Script must have a description comment (a # line after the shebang)")
+    }
+    desc = parsedDesc
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "boons-"))
+    const tmpFile = path.join(tmpDir, fileName)
+    fs.writeFileSync(tmpFile, content)
+    let valid = true
+    let syntaxErr = ""
+    if (shebang === "bash") {
+      const r = Bun.spawnSync(["bash", "-n", tmpFile])
+      valid = r.exitCode === 0
+      syntaxErr = r.stderr.toString()
+    } else if (shebang === "zsh") {
+      const r = Bun.spawnSync(["zsh", "-n", tmpFile])
+      valid = r.exitCode === 0
+      syntaxErr = r.stderr.toString()
+    }
+    fs.rmSync(tmpDir, { recursive: true })
+    if (!valid) {
+      throw new Error(`Syntax validation failed:\n${syntaxErr}`)
+    }
+  } else if (opts.command) {
+    desc = opts.description || `Run ${opts.command}`
+    content = `#!/bin/bash\n# ${desc}\nset -euo pipefail\n\n${opts.command}\n`
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "boons-"))
+    const tmpFile = path.join(tmpDir, fileName)
+    fs.writeFileSync(tmpFile, content)
+    const r = Bun.spawnSync(["bash", "-n", tmpFile])
+    if (r.exitCode !== 0) {
+      fs.rmSync(tmpDir, { recursive: true })
+      throw new Error(`Syntax validation failed:\n${r.stderr.toString()}`)
+    }
+    fs.rmSync(tmpDir, { recursive: true })
+  } else {
+    throw new Error("Provide either --file <path> or --command <string>")
+  }
+
+  const dir = scriptsDirPath(repoKey, opts.baseDir)
+  const fp = path.join(dir, fileName)
+  if (fs.existsSync(fp) && !opts.force) {
+    throw new Error(`Script "${cleanName}" already exists. Use --force to overwrite.`)
+  }
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(fp, content)
+  fs.chmodSync(fp, 0o755)
+
+  return { name: cleanName, description: desc, filePath: fp }
 }
 
 export function listScripts(repoKey: string, baseDir?: string): ScriptInfo[] {
@@ -117,7 +212,16 @@ export function runScript(
     }
   }
 
-  const result = Bun.spawnSync(["/bin/bash", script.filePath], {
+  let shell = "/bin/bash"
+  try {
+    const fileContent = fs.readFileSync(script.filePath, "utf-8")
+    const interp = detectShebang(fileContent)
+    if (interp === "zsh") shell = "/bin/zsh"
+    else if (interp === "sh") shell = "/bin/sh"
+    else if (interp === "bash") shell = "/bin/bash"
+  } catch { /* use default /bin/bash */ }
+
+  const result = Bun.spawnSync([shell, script.filePath], {
     env,
     cwd: process.cwd(),
   })
@@ -169,11 +273,68 @@ export function handleEnv(repoKey: string, baseDir?: string): void {
   fs.mkdirSync(path.dirname(ep), { recursive: true })
   if (!fs.existsSync(ep)) {
     fs.writeFileSync(ep, `# Project environment variables\n# Sourced by boons task scripts\n`)
+    fs.chmodSync(ep, 0o600)
   }
   const editor = process.env.EDITOR || process.env.VISUAL
   if (editor) {
-    Bun.spawnSync([editor, ep], { stdio: "inherit" })
+    Bun.spawnSync([editor, ep], { stdio: ["inherit", "inherit", "inherit"] })
   } else {
     console.log(`Edit project env file:\n  ${ep}`)
   }
+}
+
+export function setEnvVar(repoKey: string, key: string, value: string, baseDir?: string): void {
+  const ep = envFilePath(repoKey, baseDir)
+  fs.mkdirSync(path.dirname(ep), { recursive: true })
+  const existing = fs.existsSync(ep) ? fs.readFileSync(ep, "utf-8") : ""
+  const lines = existing.split("\n")
+  let found = false
+  const updated = lines.map((line) => {
+    const trimmed = line.trim()
+    if (trimmed.startsWith("#") || !trimmed.includes("=")) return line
+    const k = trimmed.split("=")[0].trim()
+    if (k === key) {
+      found = true
+      return `${key}=${value}`
+    }
+    return line
+  })
+  if (!found) {
+    updated.push(`${key}=${value}`)
+  }
+  const nl = updated.length > 0 ? "\n" : ""
+  fs.writeFileSync(ep, updated.join("\n") + nl)
+  fs.chmodSync(ep, 0o600)
+}
+
+export function getEnvVar(repoKey: string, key: string, baseDir?: string): string | null {
+  const ep = envFilePath(repoKey, baseDir)
+  if (!fs.existsSync(ep)) return null
+  const content = fs.readFileSync(ep, "utf-8")
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith("#") || !trimmed.includes("=")) continue
+    const k = trimmed.split("=")[0].trim()
+    if (k === key) return trimmed.slice(k.length + 1).trim()
+  }
+  return null
+}
+
+export function listEnvVars(repoKey: string, baseDir?: string): void {
+  const ep = envFilePath(repoKey, baseDir)
+  if (!fs.existsSync(ep)) {
+    console.log("No environment variables set.")
+    return
+  }
+  const content = fs.readFileSync(ep, "utf-8")
+  let found = false
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith("#") || !trimmed.includes("=")) continue
+    const k = trimmed.split("=")[0].trim()
+    const v = trimmed.slice(k.length + 1).trim()
+    console.log(`${k}=${v}`)
+    found = true
+  }
+  if (!found) console.log("No environment variables set.")
 }

@@ -1,12 +1,12 @@
 # Boons
 
-Your project's operational memory.
+Persistent memory for AI-assisted coding.
 
-Boons saves what your AI agent learned — not just the conversation, but how to work with your project. Session transcripts persist across agents and tools, and project commands survive agent resets and usage caps. Switch agents, switch tools, hit a cap — the next agent picks up where the last one left off.
+Boons ties your AI sessions to your codebase — branches, pull requests, build commands, and running services all become persistent context that survives tool switches and agent resets.
 
 ## Why
 
-AI agents are ephemeral. Every session starts fresh — no context, no muscle memory. Two problems follow:
+Every AI coding session starts from scratch — no memory of your branches, your build setup, or why decisions were made. Two problems follow:
 
 1. **Context loss** — Decisions, rationale, and exploration that never make it into a commit message disappear when the session ends.
 2. **Capability loss** — How to build, test, and deploy the project gets re-discovered on every agent reset. Worse after a usage cap: different agent, same blind start.
@@ -29,17 +29,16 @@ The team benefit is the same context, shared:
 
 ### Capability
 
-Project commands (setup, build, test, deploy) are saved as cross-tool shell scripts. The next agent — same tool or different — runs `boons task --list` and has the project's full operational knowledge. Usage caps and mid-task agent switches become frictionless: commands don't reset when the session does.
+Project commands (setup, build, test, deploy) are saved as cross-tool shell scripts. The next agent — same tool or different — runs `boons task list` and has the project's full operational knowledge. Usage caps and mid-task agent switches become frictionless: commands don't reset when the session does.
 
 - **Cross-tool** — Shell scripts aren't tied to any AI tool. OpenCode, Claude Code, Cursor, and Codex all use the same `boons task` CLI.
 - **Machine-local** — Stored in `~/.boons/tasks/<repo-key>/scripts/`, never pushed to git or cloud. Secrets stay on your machine via `.env` files.
 - **Inspectable** — Output is written to disk. Check exit codes cheaply with `boons task read <name> --status`. To search output, get the log path with `boons task path --log <name>` then grep/read just what you need.
+- **Worktree-aware** — When running across multiple git worktrees, `boons task` automatically injects unique ports and container names so services don't collide. See [Worktree resource coordination](#worktree-resource-coordination).
 
 ## How It Works
 
-Boons has two storage backends, one for each problem it solves:
-
-### Session storage (context)
+### Session persistence
 
 Every session on a branch is saved into `~/.boons/sessions/<repo-key>/<branch>/<session-id>/`, keyed by your git remote origin:
 
@@ -57,7 +56,7 @@ way teams already organize their work. Storage reflects how agents actually work
 at multiple levels of detail, from raw message logs to human-readable summaries with flexibility to
 add other documents as needed.
 
-### Task script storage (capability)
+### Project command scripts
 
 Project commands live outside the repo in `~/.boons/tasks/<repo-key>/scripts/`, keyed by
 your git remote origin. Each script is a shell file with a one-line description:
@@ -153,10 +152,11 @@ append-only and may produce artifacts across multiple files (plans, summaries, e
 the meaningful unit of work. Task scripts are the opposite — overwritten when commands change,
 reflecting that operational knowledge is always current-state.
 
-**Separate storage per problem.** Context lives in `~/.boons/sessions/`, keyed by git
-remote, and is optionally pushed to cloud for sharing. Capability lives in
-`~/.boons/tasks/`, spanning all repos and tools — because how to build the project is
-independent of any single session or tool.
+**Separate storage per concern.** Context lives in `~/.boons/sessions/`, keyed by git
+remote, and is optionally pushed to cloud for sharing. Under the capability pillar,
+task scripts live in `~/.boons/tasks/` and worktree port registries in
+`~/.boons/worktrees/` — because how to build and run the project is independent
+of any single session or tool.
 
 ## Supported Tools
 
@@ -177,24 +177,6 @@ Config is resolved from two sources in order, each inheriting and overriding the
 2. Repo-keyed (`~/.boons/config.json` → `repos.<key>`)
 
 The repo key is derived from `git remote origin`, normalized to `host/org/repo`. Remote objects are stored at `{prefix}/{repoKey}/{branch}/{sessionID}/`.
-
-### Worktree services
-
-Define services that need per-worktree ports:
-
-```json
-{
-  "worktree": {
-    "services": {
-      "web":    { "port": 3000, "env": "PORT" },
-      "db":     { "port": 5432, "env": "DB_PORT" },
-      "redis":  { "port": 6379 }
-    }
-  }
-}
-```
-
-Per-repo overrides use the same pattern under `repos.<key>.worktree`. The `env` field is optional — when set, boons exports both `BOONS_WORKTREE_PORT_{NAME}` and the short form into task environments.
 
 ## CLI Reference
 

@@ -52,6 +52,7 @@ import {
   logsDirPath,
   handleEnv,
 } from "./task"
+import { handleWorktree } from "./worktree"
 
 let pipedAnswers: string[] | null | undefined
 let pipedAnswersLoaded = false
@@ -162,6 +163,7 @@ Usage:
     boons task env set <KEY=VALUE> [...]                 Set environment variables
     boons task env get <KEY>                             Get an environment variable
     boons task env list                                  List all environment variables
+   boons worktree register|unregister|list|port|env|prune  Manage worktree port allocations
    boons --help                                          Show this message
 
 Remote flags:
@@ -1282,6 +1284,114 @@ Log files use a \`# exit: <code>\` header on line 1, then raw stdout+stderr.
 `
 }
 
+function worktreeSkillContent(t: ToolInfo): string {
+  return `---
+name: boons-worktree
+description: Manage worktree resource allocations so multiple worktrees don't collide on ports or container names.
+---
+
+## What this does
+
+When working across multiple git worktrees, each worktree needs unique ports
+for its services (web server, database, etc.). This skill coordinates port
+allocations so worktrees don't collide.
+
+## Available allocations
+
+Each registered worktree gets:
+
+- A unique **port** per configured service
+- A **\`COMPOSE_PROJECT_NAME\`** matching the branch name (so Docker containers
+  don't collide by name)
+- **Environment variables** exported for both the namespaced form
+  (\`BOONS_WORKTREE_PORT_WEB\`) and the short form (\`PORT\`, \`DB_PORT\`, etc.)
+
+## Workflow
+
+### Starting work in a new worktree
+
+When you create a worktree (or land in one for the first time):
+
+1. Run \`boons worktree register\` to allocate ports and get env vars
+2. Run \`boons task setup\` (or \`boons task <task>\`) to install deps, migrate, etc.
+3. Task scripts transparently receive the worktree-specific ports in their environment
+
+### Starting/stopping services
+
+Use \`boons task\` as usual — task scripts automatically get \`PORT\`, \`DB_PORT\`,
+etc. set to the allocated values, plus \`COMPOSE_PROJECT_NAME\` for Docker Compose.
+
+### Checking allocations
+
+Run \`boons worktree list\` to see all registered worktrees and their ports:
+
+    Branch    Path                              Ports
+    ─────────────────────────────────────────────────────
+    feat-auth /home/user/project/feat-auth       web=3001, db=5433
+    feat-api  /home/user/project/feat-api        web=3002, db=5434
+
+### Querying a single port
+
+    boons worktree port web   # → 3001
+
+### Seeing the full environment
+
+    boons worktree env
+
+Output:
+
+    export COMPOSE_PROJECT_NAME=feat-auth
+    export BOONS_WORKTREE_PORT_WEB=3001
+    export PORT=3001
+    export BOONS_WORKTREE_PORT_DB=5433
+    export DB_PORT=5433
+
+Source this into your shell with \`eval "$(boons worktree env)"\`.
+
+### Cleaning up
+
+When you're done with a worktree:
+
+1. Run \`boons task down\` (or however you stop services)
+2. Run \`boons worktree unregister\` to release port allocations
+
+Or just let pruning handle it — \`boons worktree list\` and \`boons worktree register\`
+automatically clean up stale entries for removed worktrees.
+
+## Configuration
+
+Add services to \`~/.boons/config.json\`:
+
+    {
+      "worktree": {
+        "services": {
+          "web":  { "port": 3000, "env": "PORT" },
+          "db":   { "port": 5432, "env": "DB_PORT" },
+          "redis": { "port": 6379 }
+        }
+      }
+    }
+
+The \`env\` field is optional — when set, boons exports both the namespaced
+(\`BOONS_WORKTREE_PORT_{NAME}\`) and short form. When omitted, only the
+namespaced form is exported.
+
+Per-repo overrides work the same way:
+
+    {
+      "repos": {
+        "github.com/user/project": {
+          "worktree": {
+            "services": {
+              "app": { "port": 8080, "env": "PORT" }
+            }
+          }
+        }
+      }
+    }
+`
+}
+
 async function writeSkills(t: ToolInfo, rootDir: string) {
   const skills = [
     { name: "boons-session-save", content: saveSkillContent(t) },
@@ -1291,6 +1401,7 @@ async function writeSkills(t: ToolInfo, rootDir: string) {
     { name: "boons-pr-draft", content: prDraftSkillContent(t) },
     { name: "boons-pr-review", content: prReviewSkillContent(t) },
     { name: "boons-task", content: taskSkillContent() },
+    { name: "boons-worktree", content: worktreeSkillContent(t) },
   ]
 
   for (const skill of skills) {
@@ -1633,6 +1744,9 @@ async function main() {
     case "task":
       const taskArgs = args.slice(1)
       await cmdTask(taskArgs)
+      break
+    case "worktree":
+      await handleWorktree(args.slice(1))
       break
     default:
       console.error(`Unknown command: ${cmd}`)

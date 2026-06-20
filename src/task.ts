@@ -2,6 +2,7 @@ import * as path from "path"
 import * as fs from "fs"
 import * as os from "os"
 import { getRepoKey } from "./cloud/config"
+import { getWorktreeEnv } from "./worktree/registry"
 
 export interface ScriptInfo {
   name: string
@@ -224,6 +225,13 @@ export function runScript(
     else if (interp === "sh") shell = "/bin/sh"
     else if (interp === "bash") shell = "/bin/bash"
   } catch { /* use default /bin/bash */ }
+
+  const worktreeVars = getWorktreeEnv(process.cwd())
+  if (worktreeVars) {
+    for (const [k, v] of Object.entries(worktreeVars)) {
+      env[k] = v
+    }
+  }
 
   const result = Bun.spawnSync([shell, script.filePath, ...(opts?.args || [])], {
     env,

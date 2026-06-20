@@ -33,7 +33,7 @@ Project commands (setup, build, test, deploy) are saved as cross-tool shell scri
 
 - **Cross-tool** — Shell scripts aren't tied to any AI tool. OpenCode, Claude Code, Cursor, and Codex all use the same `boons task` CLI.
 - **Machine-local** — Stored in `~/.boons/tasks/<repo-key>/scripts/`, never pushed to git or cloud. Secrets stay on your machine via `.env` files.
-- **Inspectable** — Output is written to disk. Read it with `boons task read <name>` or `boons task read <name> --status` to check exit codes without reading full output.
+- **Inspectable** — Output is written to disk. Check exit codes cheaply with `boons task read <name> --status`. To search output, get the log path with `boons task path --log <name>` then grep/read just what you need.
 
 ## How It Works
 
@@ -66,10 +66,7 @@ your git remote origin. Each script is a shell file with a one-line description:
 - `build.sh`, `test.sh`, `deploy.sh` — run with `boons task <name>`
 - `.env` — per-project environment variables, sourced automatically
 
-Your agent populates these scripts as it works. When it discovers how to build the project, it
-writes `build.sh`. When commands change, it updates the script. The next agent — or the same
-agent after a usage cap reset — runs `boons task --list` and has the full operational picture
-without re-discovery.
+Your agent populates these scripts as it works using `boons task create`. When it discovers how to build the project, it creates `build.sh`. When commands change, it runs `boons task update`. The next agent — or the same agent after a usage cap reset — runs `boons task list` and has the full operational picture without re-discovery.
 
 ### Worktree resource coordination
 
@@ -106,7 +103,7 @@ Once boons is installed, your agent handles the mechanics automatically:
 - **Pull on branch switch** — When switching to a branch with saved sessions, your agent suggests loading them.
 - **PR context** — When drafting or reviewing a PR, your agent loads session context to ground the description or review in the decision history.
 - **Query on demand** — "What did we decide about X?" Your agent searches the session history.
-- **Project commands** — When discovering build, test, or deploy commands, your agent saves them as `boons task` scripts. Before running project commands, it checks `boons task --list` first.
+- **Project commands** — When discovering build, test, or deploy commands, your agent saves them as task scripts with `boons task create`. Before running project commands, it checks `boons task list` first.
 - **Worktree coordination** — When operating in a git worktree, the agent runs `boons worktree register` to allocate unique ports and `boons worktree unregister` on cleanup. Task scripts automatically receive the allocated ports in their environment.
 
 ## Team Collaboration
@@ -213,10 +210,16 @@ boons push [--session-id <id>] [--branch <b>]          Push sessions to cloud
 boons pull [--session-id <id>] [--branch <b>]          Pull from cloud
 boons task [<name>] [--verbose] [-- <args>]            Run a task script (default: setup.sh)
 boons task list                                        List available task scripts
-boons task check                                       Print task scripts without executing
-boons task read <name> [--status]                      Read task output or exit status
-boons task create <name> --command "<cmd>"             Create a task script
-boons task update <name> --command "<cmd>"             Update a task script
+boons task check                                       Print all task scripts without running
+boons task path                                        Print scripts directory path
+boons task path --logs                                 Print logs directory path
+boons task path --log <name>                           Print log file path for a task
+boons task path <name>                                 Print script file path for a task
+boons task read <name> [--status]                      ⚠ Read task output (disfavored — use path+grep instead)
+boons task create <name> --command "<cmd>"             Create a task script from a one-liner
+boons task create <name> --file <path> [--force]       Create a task script from a file
+boons task update <name> --command "<cmd>"             Update a task script (preserves description)
+boons task update <name> --file <path>                 Update a task script from a file
 boons task env [set KEY=VALUE ... | get <key> | list]  Manage environment variables
 boons worktree register                                Allocate ports for this worktree
 boons worktree unregister                              Release ports for this worktree

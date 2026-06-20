@@ -1,4 +1,10 @@
 node_modules/
 
-# opencode project skills
+# project-scoped agent skills (use `boons install <tool>` globally instead)
+.opencode/skills/
+.claude/skills/
+.cursor/skills/
+.agents/skills/
+
+# opencode project dependencies
 .opencode/node_modules/

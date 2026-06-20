@@ -71,6 +71,23 @@ writes `build.sh`. When commands change, it updates the script. The next agent �
 agent after a usage cap reset — runs `boons task --list` and has the full operational picture
 without re-discovery.
 
+### Worktree resource coordination
+
+When working across multiple git worktrees, each one needs unique ports for its services (web
+server, database, etc.) and unique container names for Docker Compose — otherwise they collide.
+
+Boons provides a lightweight port registry at `~/.boons/worktrees/<repo-key>/registry.json`.
+
+Run `boons worktree register` to allocate ports for the current worktree. Allocations persist
+and are scoped to the repo — a second worktree gets the next available ports.
+
+Task scripts transparently receive the allocated values: every `boons task` invocation injects
+`COMPOSE_PROJECT_NAME`, `BOONS_WORKTREE_PORT_{NAME}`, and optional short env vars (`PORT`,
+`DB_PORT`, etc.) into the script environment. No `.env` file to manage and no manual port
+tracking across worktrees.
+
+See the CLI reference below for `boons worktree register`, `list`, `port`, `env`, and `prune`.
+
 ## Quick Start
 
 ```sh
@@ -90,6 +107,7 @@ Once boons is installed, your agent handles the mechanics automatically:
 - **PR context** — When drafting or reviewing a PR, your agent loads session context to ground the description or review in the decision history.
 - **Query on demand** — "What did we decide about X?" Your agent searches the session history.
 - **Project commands** — When discovering build, test, or deploy commands, your agent saves them as `boons task` scripts. Before running project commands, it checks `boons task --list` first.
+- **Worktree coordination** — When operating in a git worktree, the agent runs `boons worktree register` to allocate unique ports and `boons worktree unregister` on cleanup. Task scripts automatically receive the allocated ports in their environment.
 
 ## Team Collaboration
 
@@ -148,7 +166,7 @@ independent of any single session or tool.
 | Tool | Integration | Session Source |
 |------|-------------|----------------|
 | Open Code | Native plugin: custom tools + skills in `~/.config/opencode/` | `opencode.db` (SQLite) |
-| Claude Code | Plugin: 7 SKILL.md files in `~/.claude/plugins/boons/` | JSONL under `~/.claude/projects/` |
+| Claude Code | Plugin: SKILL.md files in `~/.claude/plugins/boons/` | JSONL under `~/.claude/projects/` |
 | Cursor | `.mdc` rules in `~/.cursor/rules/` | Agent-transcript JSONL + SQLite metadata |
 | Codex | `AGENTS.md` rules + skills in `.agents/skills` or `~/.agents/skills` | JSONL under `~/.codex/sessions/` |
 
@@ -163,23 +181,49 @@ Config is resolved from two sources in order, each inheriting and overriding the
 
 The repo key is derived from `git remote origin`, normalized to `host/org/repo`. Remote objects are stored at `{prefix}/{repoKey}/{branch}/{sessionID}/`.
 
+### Worktree services
+
+Define services that need per-worktree ports:
+
+```json
+{
+  "worktree": {
+    "services": {
+      "web":    { "port": 3000, "env": "PORT" },
+      "db":     { "port": 5432, "env": "DB_PORT" },
+      "redis":  { "port": 6379 }
+    }
+  }
+}
+```
+
+Per-repo overrides use the same pattern under `repos.<key>.worktree`. The `env` field is optional — when set, boons exports both `BOONS_WORKTREE_PORT_{NAME}` and the short form into task environments.
+
 ## CLI Reference
 
 ```
-boons session-save --tool <name> [--session-id <id>] [--summary <text>]
-                                                  Save session for current branch
-boons ls [--branch <name>]                        List saved sessions
-boons ls --remote [--branch <name>]                List remote sessions
-boons install <tool>                               Install skills for a tool (+ global rules)
-boons install <tool> --project                     Install skills scoped to the project (+ project rules)
-boons remote                                       Show remote config, or prompt if none
-boons remote --provider aws|gcp|azure ...           Configure remote
-boons remote --project --provider aws|gcp|azure    Configure remote per-repo (stored in global config)
-boons push [--session-id <id>] [--branch <b>]      Push sessions to cloud
-boons pull [--session-id <id>] [--branch <b>]      Pull from cloud
-boons task [<name>] [--verbose]                    Run a task script (default: setup.sh)
-boons task --list                                   List available task scripts
-boons task read <name> [--status]                  Read task output or exit status
+boons session-read --tool <name> --session-id <id>     Read session messages as text
+boons session-save --tool <name> --summary <text>      Save session for current branch
+  [--session-id <id>] [--file <path>...]
+boons ls [--branch <name>] [--json]                    List saved sessions
+boons ls --remote [--branch <name>] [--json]           List remote sessions
+boons install <tool> [--project]                       Install skills for a tool
+boons remote [--provider aws|gcp|azure ...]            Configure remote
+boons push [--session-id <id>] [--branch <b>]          Push sessions to cloud
+boons pull [--session-id <id>] [--branch <b>]          Pull from cloud
+boons task [<name>] [--verbose] [-- <args>]            Run a task script (default: setup.sh)
+boons task list                                        List available task scripts
+boons task check                                       Print task scripts without executing
+boons task read <name> [--status]                      Read task output or exit status
+boons task create <name> --command "<cmd>"             Create a task script
+boons task update <name> --command "<cmd>"             Update a task script
+boons task env [set KEY=VALUE ... | get <key> | list]  Manage environment variables
+boons worktree register                                Allocate ports for this worktree
+boons worktree unregister                              Release ports for this worktree
+boons worktree list [--json]                           List all registered worktrees
+boons worktree port <service>                          Show allocated port for a service
+boons worktree env                                     Print worktree environment variables
+boons worktree prune                                   Remove stale registry entries
 ```
 
 ## Prerequisites

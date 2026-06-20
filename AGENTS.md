@@ -12,8 +12,10 @@ existing script. Use `boons task <name>` instead, or auto-create one with
 
 Also available: boons-session-load (prior context), boons-session-push (share
 to cloud), boons-session-pull (fetch from cloud), boons-pr-draft (PR
-descriptions), boons-pr-review (PR reviews), boons-task (project task runner).
+descriptions), boons-pr-review (PR reviews), boons-task (project task runner),
+boons-worktree (worktree port coordination).
 <!-- /boons -->
+
 
 
 

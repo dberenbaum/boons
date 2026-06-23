@@ -22,28 +22,65 @@ else
   git clone --depth 1 "$REPO" "$INSTALL_DIR"
 fi
 
-SHELL_CONFIG=""
-case "${SHELL:-}" in
-  *zsh) SHELL_CONFIG="$HOME/.zshrc" ;;
-  *bash) SHELL_CONFIG="$HOME/.bashrc" ;;
-  *fish) SHELL_CONFIG="$HOME/.config/fish/config.fish" ;;
-esac
+ensure_boons_on_path() {
+  local bin_dir="$HOME/.local/bin"
+  local boons_bin="$INSTALL_DIR/bin/boons"
+  local link_path="$bin_dir/boons"
 
-if [ -n "$SHELL_CONFIG" ]; then
-  if ! grep -q "boons/bin" "$SHELL_CONFIG" 2>/dev/null; then
-    echo "==> Adding boons to PATH in $SHELL_CONFIG"
-    echo "" >> "$SHELL_CONFIG"
-    echo "# boons" >> "$SHELL_CONFIG"
-    echo "export PATH=\"\$PATH:$INSTALL_DIR/bin\"" >> "$SHELL_CONFIG"
+  mkdir -p "$bin_dir"
+  ln -sf "$boons_bin" "$link_path"
+
+  # Remove any legacy boons/bin PATH entries from shell configs
+  for rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.config/fish/config.fish"; do
+    if [ -f "$rc" ] && grep -q 'boons/bin' "$rc" 2>/dev/null; then
+      local tmp
+      tmp=$(grep -v 'boons/bin' "$rc" 2>/dev/null) || true
+      printf '%s\n' "$tmp" > "$rc"
+      echo "==> Removed old boons PATH entry from $rc"
+    fi
+  done
+
+  # Check if ~/.local/bin is already on PATH
+  case ":$PATH:" in
+    *:"$bin_dir":*) return 0 ;;
+  esac
+
+  # Not on PATH — add to shell config
+  local rc_file=""
+  case "${SHELL:-}" in
+    *zsh) rc_file="$HOME/.zshrc" ;;
+    *bash) rc_file="$HOME/.bashrc" ;;
+    *fish) rc_file="$HOME/.config/fish/config.fish" ;;
+  esac
+
+  if [ -n "$rc_file" ]; then
+    if grep -qF "$bin_dir" "$rc_file" 2>/dev/null; then
+      return 0
+    fi
+    echo "" >> "$rc_file"
+    echo "# boons" >> "$rc_file"
+    echo "export PATH=\"\$PATH:$bin_dir\"" >> "$rc_file"
+    echo "==> Added $bin_dir to PATH in $rc_file"
+  else
+    echo "==> Unknown shell. Add $bin_dir to your PATH manually."
   fi
-fi
+}
+
+ensure_boons_on_path
 
 echo ""
 echo "  Boons installed to $INSTALL_DIR"
-echo "  Restart your shell or run:"
+echo "  Linked $HOME/.local/bin/boons"
 echo ""
-echo "    export PATH=\"\$PATH:$INSTALL_DIR/bin\""
-echo "    boons install opencode"
+if case ":$PATH:" in *:"$HOME/.local/bin":*) true;; *) false;; esac; then
+  echo "  Run 'boons install opencode' to get started."
+else
+  echo "  Restart your shell or run:"
+  echo ""
+  echo "    export PATH=\"\$PATH:$HOME/.local/bin\""
+  echo ""
+  echo "  Then run 'boons install opencode' to get started."
+fi
 echo ""
 echo "  Then use session-save, session-push, and session-pull"
 echo "  from inside your agent."

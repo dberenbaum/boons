@@ -778,6 +778,15 @@ Before saving, check the current branch with \`git rev-parse --abbrev-ref HEAD\`
 - When starting a new task, suggest branching first if the user is on \`main\`.
 - When the user is about to switch branches, save the current session first
   so context is captured on the right branch.
+- When transitioning from planning/exploration to implementation, and
+  still on \`main\`/\`master\`/\`HEAD\`, proactively suggest branching before
+  implementing. Offer concrete options:
+  - \`git checkout -b <branch>\` — quick branch in place
+  - \`git worktree add -b <branch> ../<feature>\` then
+    \`boons worktree register\` — isolated worktree with port allocation
+  Save the session and plan.md first so context is captured on the
+  correct branch.
+
 ## Using the command
 
 1. Run \`boons session-read --tool ${t.flag}\` to review the conversation

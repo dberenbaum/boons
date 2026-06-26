@@ -4,6 +4,8 @@
 Save sessions after modifying files, after making plans, before
 committing, before switching branches, or every ~15 tool calls.
 Use `boons session-save --summary "..."`.
+When on main and transitioning from planning to implementation,
+suggest branching or a worktree first.
 
 Before running any project command (install, build, test, deploy, etc.),
 load the boons-task skill and run `boons task list` to check for an

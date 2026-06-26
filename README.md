@@ -88,10 +88,12 @@ See the CLI reference below for `boons worktree register`, `list`, `port`, `env`
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/dberenbaum/boons/main/install.sh | bash
-boons install opencode
+boons install
 ```
 
-That's it. Your agent will now auto-save sessions and manage project commands on this project. To enable sharing, configure cloud storage with `boons remote`.
+Boons auto-detects which AI coding tools are on your PATH and installs skills for all of them. To install for a specific tool or see all supported tools, use `boons install opencode` (replacing `opencode` with `claude-code`, `cursor`, or `codex`).
+
+To enable sharing, configure cloud storage with `boons remote`.
 
 ## Agent Behavior
 
@@ -118,13 +120,12 @@ Sessions are scoped to branches. When you push code to a shared remote, you can 
 ## Install Details
 
 ```sh
-boons install opencode    # OpenCode tools + skills (including boons-task)
-boons install claude-code # Claude Code plugin + skills (including boons-task)
-boons install cursor      # Cursor .mdc rules (including boons-task)
-boons install codex       # Codex AGENTS.md + skills (including boons-task)
+boons install                         # Auto-detect + install skills for all tools found on PATH
+boons install --project               # Same, but project-scoped rules
+boons install opencode                # Install for a specific tool (opencode, claude-code, cursor, codex)
 ```
 
-Each install command writes the agent skills and tool definitions that enable auto-save and project task scripts.
+Each install command writes the agent skills and tool definitions that enable auto-save and project task scripts. When run without a tool name, boons auto-detects which tools are available on your PATH.
 
 Cloud storage can be configured later with:
 
@@ -186,7 +187,7 @@ boons session-save --tool <name> --summary <text>      Save session for current 
   [--session-id <id>] [--file <path>...]
 boons ls [--branch <name>] [--json]                    List saved sessions
 boons ls --remote [--branch <name>] [--json]           List remote sessions
-boons install <tool> [--project]                       Install skills for a tool
+boons install [<tool>] [--project]                     Install skills (auto-detects if no tool specified)
 boons remote [--provider aws|gcp|azure ...]            Configure remote
 boons push [--session-id <id>] [--branch <b>]          Push sessions to cloud
 boons pull [--session-id <id>] [--branch <b>]          Pull from cloud

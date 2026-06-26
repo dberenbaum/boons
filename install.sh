@@ -73,13 +73,13 @@ echo "  Boons installed to $INSTALL_DIR"
 echo "  Linked $HOME/.local/bin/boons"
 echo ""
 if case ":$PATH:" in *:"$HOME/.local/bin":*) true;; *) false;; esac; then
-  echo "  Run 'boons install opencode' to get started."
+  echo "  Run 'boons install' to get started."
 else
   echo "  Restart your shell or run:"
   echo ""
   echo "    export PATH=\"\$PATH:$HOME/.local/bin\""
   echo ""
-  echo "  Then run 'boons install opencode' to get started."
+  echo "  Then run 'boons install' to get started."
 fi
 echo ""
 echo "  Then use session-save, session-push, and session-pull"

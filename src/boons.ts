@@ -140,8 +140,8 @@ Usage:
                                                         Save session + authored files
   boons ls [--branch <name>] [--json]                   List saved sessions
   boons ls --remote [--branch <name>] [--json]          List remote sessions
-   boons install <tool>                                Install skills for a tool (+ global rules)
-   boons install <tool> --project                      Install skills scoped to the project (+ project rules)
+   boons install [<tool>]                               Install skills (auto-detects if no tool given)
+   boons install [<tool>] --project                     Install skills scoped to the project
   boons remote                                          Show remote config, or prompt if none
   boons remote --provider aws|gcp|azure ...             Configure cloud remote
    boons remote --project --provider aws|gcp|azure ...   Configure cloud remote per-repo (stored in global config)
@@ -501,6 +501,58 @@ function writeConfigTarget(target: "project" | "global-default", config: RemoteC
     globalCfg.repos[repoKey] = config
     writeGlobalConfig(globalCfg)
     console.log(`Wrote to ~/.boons/config.json (repos.${repoKey})`)
+  }
+}
+
+function isToolInstalled(tool: string): boolean {
+  const binaryName: Record<string, string> = {
+    opencode: "opencode",
+    "claude-code": "claude",
+    cursor: "cursor",
+    codex: "codex",
+  }
+  const bin = binaryName[tool]
+  if (bin && Bun.which(bin)) return true
+
+  const configDir: Record<string, string> = {
+    opencode: path.join(os.homedir(), ".config", "opencode"),
+    "claude-code": path.join(os.homedir(), ".claude"),
+    cursor: path.join(os.homedir(), ".cursor"),
+    codex: path.join(os.homedir(), ".agents"),
+  }
+  const dir = configDir[tool]
+  if (dir) {
+    try { return fs.statSync(dir).isDirectory() } catch {}
+  }
+
+  return false
+}
+
+async function cmdInstallAutoDetect(opts: Record<string, string>) {
+  const projectDir = opts["--project"] === "true" ? process.cwd() : undefined
+  const detected: string[] = []
+  const notDetected: string[] = []
+
+  for (const tool of validTools()) {
+    if (isToolInstalled(tool)) {
+      detected.push(tool)
+      await cmdInstall(tool, opts)
+    } else {
+      notDetected.push(tool)
+    }
+  }
+
+  const scope = projectDir ? "project-scoped" : "global"
+  if (detected.length > 0) {
+    console.log(`Installed ${scope} skills for: ${detected.join(", ")}`)
+  }
+  if (notDetected.length > 0) {
+    console.log(`Not detected (install manually with 'boons install <tool>'): ${notDetected.join(", ")}`)
+  }
+  if (detected.length === 0) {
+    console.log("No supported AI coding tools detected on PATH.")
+    console.log("Install one of: " + validTools().join(", "))
+    process.exit(1)
   }
 }
 
@@ -1738,11 +1790,11 @@ async function main() {
       break
     case "install":
       const tool = args.slice(1).find(a => !a.startsWith("-"))
-      if (!tool) {
-        console.log(HELP)
-        process.exit(1)
+      if (tool) {
+        await cmdInstall(tool, opts)
+      } else {
+        await cmdInstallAutoDetect(opts)
       }
-      await cmdInstall(tool, opts)
       break
     case "remote":
       await cmdRemote(opts)

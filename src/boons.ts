@@ -1561,6 +1561,8 @@ async function cmdTask(args: string[]) {
     }
     const result = runScript(repoKey, sub, { verbose, baseDir, args: scriptArgs })
     if (result.output) console.log(result.output)
+    const symbol = result.exitCode === 0 ? "\u2713" : "\u2717"
+    console.log(`${symbol} boons task ${sub} — exit: ${result.exitCode}`)
     process.exit(result.exitCode)
   }
 

@@ -594,8 +594,8 @@ const BOONS_BLOCK = [
   "<!-- boons -->",
   "# boons",
   "",
-  "Save sessions after modifying files, after making plans, before",
-  "committing, before switching branches, or every ~15 tool calls.",
+  "Save sessions after making plans, before committing, before switching",
+  "branches, or every ~15 tool calls.",
   "Use `boons session-save --summary \"...\"`.",
   "",
   "Before running any project command (install, build, test, deploy, etc.),",
@@ -763,7 +763,7 @@ const tools: Record<string, ToolInfo> = {
 function saveSkillContent(t: ToolInfo): string {
   return `---
 name: boons-session-save
-description: "Save session checkpoints automatically: after modifying files, before commits, before branch switches, every ~15 tool calls, or when user is satisfied. Load before git commit or branch switch."
+description: "Save session checkpoints automatically: before commits, before branch switches, every ~15 tool calls, after planning, or when user is satisfied. Load before git commit or branch switch."
 ---
 
 ## When to load this skill
@@ -773,7 +773,6 @@ Load this skill whenever you are about to or have just done any of the following
 - Make a git commit
 - Switch branches (checkout, branch create)
 - Passed ~15 tool calls since the last save
-- Modified multiple files
 - Wrap up a task or discussion
 - The user expresses satisfaction ("looks good", "great", "thanks")
 
@@ -792,8 +791,6 @@ Each export creates a session directory containing:
 Run \`boons session-save --tool ${t.flag} --summary "..."\` **automatically**
 (no need to ask the user) when:
 
-- **You modified files** — after writing code that changes multiple files,
-  add a commit, or fix a bug. You know work happened; save it.
 - **After planning or exploration** — after researching options,
   exploring the codebase, or formulating a plan. Write a \`plan.md\`
   with intent and next steps and save it via \`--file\` so a fresh

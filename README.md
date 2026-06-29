@@ -46,7 +46,7 @@ Every session on a branch is saved into `~/.boons/sessions/<repo-key>/<branch>/<
 - `info.json` — metadata (tool, author, branch, timestamps)
 - `summary.md` — what was accomplished and what remains uncertain
 
-Your agent auto-saves at meaningful checkpoints: after modifying files, after a git commit, when you wrap up a task, or every ~15 messages of real work. No need to remember. Optional `plan.md` and `decisions.md` add richer context for future readers.
+Your agent auto-saves at meaningful checkpoints: after a git commit, when you wrap up a task, or every ~15 messages of real work. No need to remember. Optional `plan.md` and `decisions.md` add richer context for future readers.
 
 When you want to share, sessions sync to a shared cloud bucket. When you want to understand someone else's work, your agent pulls and reads their sessions for you.
 

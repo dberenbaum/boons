@@ -594,8 +594,7 @@ const BOONS_BLOCK = [
   "<!-- boons -->",
   "# boons",
   "",
-  "Save sessions after making plans, before committing, before switching",
-  "branches, or every ~15 tool calls.",
+  "Save sessions after making plans, before switching branches, or every ~15 tool calls.",
   "Use `boons session-save --summary \"...\"`.",
   "",
   "Before running any project command (install, build, test, deploy, etc.),",
@@ -763,14 +762,13 @@ const tools: Record<string, ToolInfo> = {
 function saveSkillContent(t: ToolInfo): string {
   return `---
 name: boons-session-save
-description: "Save session checkpoints automatically: before commits, before branch switches, every ~15 tool calls, after planning, or when user is satisfied. Load before git commit or branch switch."
+description: "Save session checkpoints automatically: before branch switches, every ~15 tool calls, after planning, or when user is satisfied. Load before branch switch."
 ---
 
 ## When to load this skill
 
 Load this skill whenever you are about to or have just done any of the following:
 
-- Make a git commit
 - Switch branches (checkout, branch create)
 - Passed ~15 tool calls since the last save
 - Wrap up a task or discussion
@@ -803,8 +801,6 @@ Run \`boons session-save --tool ${t.flag} --summary "..."\` **automatically**
   "thanks". Treat this as a close signal worth capturing.
 - **Every ~15 tool calls** since the last save — save a checkpoint so the
   session history is never more than a few exchanges behind.
-- **A git commit is made** — if you were involved in the commit, save first
-  so the session matches the commit.
 - **Before creating a branch** — save before running \`git checkout -b\` or
   \`git branch\` to capture the exploration that led to it.
 - **The user explicitly asks** — always.

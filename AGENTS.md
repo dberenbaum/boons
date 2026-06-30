@@ -1,8 +1,7 @@
 <!-- boons -->
 # boons
 
-Save sessions after making plans, before committing, before switching
-branches, or every ~15 tool calls.
+Save sessions after making plans, before switching branches, or every ~15 tool calls.
 Use `boons session-save --summary "..."`.
 
 Before running any project command (install, build, test, deploy, etc.),

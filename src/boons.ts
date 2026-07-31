@@ -35,6 +35,13 @@ import {
   getSessionsDir,
   getSessionsBranchDir,
 } from "./cloud"
+import { getBranch } from "./git"
+import {
+  collectPlans,
+  readManifest,
+  snapshotFiles,
+  writePlan,
+} from "./plan"
 import {
   listScripts,
   getScript,
@@ -138,6 +145,9 @@ Usage:
   boons session-read --tool <name> --session-id <id>   Read session messages as text
   boons session-save --tool <name> --session-id <id> --summary <text> [--file <path>...] [--json]
                                                         Save session + authored files
+  boons plan [<name>] [--branch <b>] [--all] [--json]  List plans, or print latest content of one
+  boons plan set --name <name> (--file <path> | --text "<content>")
+                                                        Update a plan without resummarizing the session
   boons ls [--branch <name>] [--json]                   List saved sessions
   boons ls --remote [--branch <name>] [--json]          List remote sessions
    boons install [<tool>]                               Install skills (auto-detects if no tool given)
@@ -178,7 +188,10 @@ Options:
   --tool <name>       Tool to read from (opencode | claude-code | cursor | codex)
   --summary <text>    Session summary (required for session-save)
   --session-id <id>   Session to read/save/push/pull (required for session-read, auto-detect for others)
-  --file <path>       File to include in session directory (repeatable, for session-save)
+  --file <path>       File to include in session directory (repeatable, for session-save); tracked as a plan
+  --name <name>       Plan name (default: file basename, for plan set)
+  --text <content>    Plan content to store (for plan set; alternative to --file)
+  --all               Include non-plan tracked docs in the plan listing (for plan list)
   --branch <name>     Filter by branch (default: current branch)
    --global            Install globally (default; use --project for project-scoped skills)
   --json              Output as JSON (for tool integration)
@@ -214,10 +227,13 @@ async function cmdSessionSave(args: Record<string, string>, extraFiles: string[]
 
   const result = await exportSession({ tool, sessionID, summary })
 
-  for (const filePath of extraFiles) {
-    const basename = path.basename(filePath)
-    await Bun.write(path.join(result.dir, basename), Bun.file(filePath))
-    if (!asJson) console.log(`  wrote ${basename}`)
+  if (extraFiles.length > 0) {
+    snapshotFiles(result.dir, extraFiles)
+    if (!asJson) {
+      for (const filePath of extraFiles) {
+        console.log(`  wrote ${path.basename(filePath)}`)
+      }
+    }
   }
 
   if (asJson) {
@@ -225,6 +241,113 @@ async function cmdSessionSave(args: Record<string, string>, extraFiles: string[]
   } else {
     console.log(`Saved ${result.messageCount} messages to ${result.dir}`)
   }
+}
+
+async function cmdPlan(
+  args: Record<string, string | string[]>,
+  positional: string[],
+) {
+  const cwd = process.cwd()
+  const branch = (args["--branch"] as string) ?? getBranch(cwd)
+  const asJson = args["--json"] === "true"
+  const all = args["--all"] === "true"
+  const sessionID = args["--session-id"] as string | undefined
+  const name = positional[0] ?? (args["--name"] as string | undefined)
+
+  let docs = collectPlans(branch, cwd)
+  if (sessionID) {
+    const sessionDir = path.join(getSessionsBranchDir(branch, cwd), sessionID)
+    docs = readManifest(sessionDir).map((e) => ({
+      ...e,
+      sessionID,
+      path: path.join(sessionDir, e.file),
+    }))
+  }
+  if (!all) docs = docs.filter((d) => d.kind === "plan")
+
+  if (name) {
+    const doc = docs.find((d) => d.name === name)
+    if (!doc) {
+      console.error(`No plan "${name}" found on branch "${branch}".`)
+      process.exit(1)
+    }
+    let content: string
+    try {
+      content = fs.readFileSync(doc.path, "utf-8")
+    } catch {
+      console.error(`Plan file missing: ${doc.path}`)
+      process.exit(1)
+    }
+    process.stdout.write(content.endsWith("\n") ? content : content + "\n")
+    return
+  }
+
+  if (asJson) {
+    console.log(JSON.stringify(docs, null, 2))
+    return
+  }
+
+  if (docs.length === 0) {
+    console.log(`No plans found on branch "${branch}".`)
+    return
+  }
+
+  const nameWidth = Math.max(...docs.map((d) => d.name.length), 4)
+  const kindWidth = Math.max(...docs.map((d) => d.kind.length), 4)
+  const header = [
+    "Name".padEnd(nameWidth),
+    "Kind".padEnd(kindWidth),
+    "Session".padEnd(28),
+    "Saved",
+  ].join("  ")
+  console.log(header)
+  console.log("─".repeat(header.length))
+  for (const d of docs) {
+    console.log(
+      [
+        d.name.padEnd(nameWidth),
+        d.kind.padEnd(kindWidth),
+        d.sessionID.length > 26 ? d.sessionID.slice(0, 23) + "..." : d.sessionID.padEnd(28),
+        d.savedAt,
+      ].join("  "),
+    )
+  }
+}
+
+async function cmdPlanSet(args: Record<string, string | string[]>) {
+  const cwd = process.cwd()
+  const branch = (args["--branch"] as string | undefined) ?? getBranch(cwd)
+  const name = args["--name"] as string | undefined
+  const file = Array.isArray(args["--file"])
+    ? (args["--file"] as string[])[0]
+    : (args["--file"] as string | undefined)
+  const text = args["--text"] as string | undefined
+
+  if (!name) {
+    console.error("--name is required for plan set.")
+    process.exit(1)
+  }
+  if (!file && !text) {
+    console.error("Provide plan content via --file <path> or --text <content>.")
+    process.exit(1)
+  }
+
+  let content: string
+  let source: string | undefined
+  if (file) {
+    try {
+      content = fs.readFileSync(file, "utf-8")
+      source = file
+    } catch {
+      console.error(`Cannot read file: ${file}`)
+      process.exit(1)
+    }
+  } else {
+    content = text as string
+  }
+
+  const { entry } = writePlan(branch, { name, content, source }, cwd)
+  console.log(`Wrote ${name} to ${entry.savedAt}`)
 }
 
 async function cmdSessionRead(args: Record<string, string>) {
@@ -337,7 +460,7 @@ async function cmdLs(args: Record<string, string>) {
 
     const entries = fs.readdirSync(sessionPath)
     const extras = entries.filter(
-      (f) => f !== "info.json" && f !== "raw.jsonl",
+      (f) => f !== "info.json" && f !== "raw.jsonl" && f !== "plans.json",
     )
 
     rows.push({
@@ -782,7 +905,9 @@ Each export creates a session directory containing:
 - \`raw.jsonl\` — the complete message history in native format
 - \`info.json\` — metadata (session name, author, branch, participants, timestamps)
 - \`summary.md\` — a summary you auto-generate when saving
-- Any other files you include via \`--file\` (plan.md, decisions.md, etc.)
+- Any living docs you include via \`--file\` (plan.md, decisions.md, etc.);
+  each is snapshotted into the session dir and recorded in \`plans.json\`
+  so the latest version is discoverable via \`boons plan\`
 
 ## When to save — be proactive
 
@@ -846,13 +971,27 @@ Before saving, check the current branch with \`git rev-parse --abbrev-ref HEAD\`
    files changed, and what's still open or uncertain. Future agents
    read this summary first to decide if the full session is relevant.
 3. Run \`boons session-save --tool ${t.flag} --summary "<summary>" \\
-      --file /path/to/summary.md [--file /path/to/plan.md]\`
-   Use \`--file\` for each authored file to copy into the session directory
-   alongside the auto-generated export (raw.jsonl, info.json, summary.md from --summary).
+      --file /path/to/plan.md [--file /path/to/decisions.md]\`
+   Use \`--file\` for each living doc (plan.md, decisions.md, specs, TODOs).
+   Each file is copied into the session directory and tracked in
+   \`plans.json\`, so the latest snapshot is always retrievable via
+   \`boons plan\` — even after the worktree is removed.
 
 The \`--session-id\` flag is optional — when omitted, boons automatically
 detects the most recent session for the current project. Pass \`--session-id\`
 explicitly to target a different session.
+
+## Updating plans without a full save
+
+When a plan changes between saves, update it in place (no resummarizing):
+
+- \`boons plan set --name plan.md --file /path/to/plan.md\` — store the
+  current contents of a local file
+- \`boons plan set --name decisions.md --text "<new text>"\` — store
+  inline content directly
+
+Plans are keyed by name; the latest \`boons plan set\` or \`session-save\`
+wins. A fresh session can load the current plan with \`boons plan plan.md\`.
 
 You may also optionally create:
 
@@ -897,6 +1036,22 @@ Sessions may also have additional files generated after export:
 
 To see which files are present for a particular session, list its directory.
 
+## Plans — always check boons
+
+Living docs (plan.md, decisions.md, specs) are tracked in each session's
+\`plans.json\` manifest. Find the latest version of any plan without
+hunting through sessions:
+
+- \`boons plan\` — list plans on the current branch (latest of each)
+- \`boons plan <name>\` — print the latest content of a plan
+- \`boons plan --all\` — include non-plan tracked docs
+- \`boons plan set --name <name> --file <path> | --text "<content>"\`
+  — update a plan without resummarizing the session
+
+Always check \`boons plan\` for the current plan before starting work,
+and prefer the plan it returns over a plan.md in the working tree
+(which may be stale or missing in a deleted worktree).
+
 ## Protocols
 
 ### On branch checkout or creation
@@ -908,7 +1063,8 @@ existing context:
 2. Read \`summary.md\` from **every session** on the branch to
    understand the full narrative arc — skim all summaries, then
    decide which sessions need a deeper look via \`raw.jsonl\`
-3. Also read \`plan.md\` and \`decisions.md\` if present
+3. Run \`boons plan [--branch <name>]\` to find the latest plan
+   docs, then read the current ones
 4. Orient the user: "Sessions on this branch worked on X, Y, Z.
    Key decisions so far: A. Still open or uncertain: B."
 5. If the new branch has no sessions, check for sessions on the branch
@@ -1064,8 +1220,8 @@ When the user asks you to draft a PR, create a PR, or write a PR description:
 
 1. **Discover sessions** — run \`boons ls [--branch <name>]\` for the branch
    (defaults to current branch)
-2. **Load context** — read \`summary.md\`, \`plan.md\`, and \`decisions.md\` from
-   every session on the branch
+2. **Load context** — read \`summary.md\` from every session, and use
+   \`boons plan [--branch <name>]\` to get the latest plan and decisions docs
 3. **Cross-reference** — identify what was settled, what changed direction
    midstream, and what's still open
 4. **Draft** — produce a PR description with sections: what changed, why,
@@ -1101,8 +1257,8 @@ someone else's work:
 1. **Fetch context** — if the branch has remote sessions, suggest
    \`boons pull\` to fetch them first
 2. **Discover sessions** — run \`boons ls [--branch <name>]\` for the branch
-3. **Load context** — read \`summary.md\`, \`plan.md\`, and \`decisions.md\` from
-   every session
+3. **Load context** — read \`summary.md\` from every session, and use
+   \`boons plan [--branch <name>]\` to get the latest plan and decisions docs
 4. **Synthesize** — understand the overall purpose, what was built, design
    rationale, and open questions
 5. **Review the diff** — examine the actual code changes with that context.
@@ -1777,6 +1933,17 @@ async function main() {
       break
     case "session-save":
       await cmdSessionSave(opts as Record<string, string>, extraFiles)
+      break
+    case "plan":
+      const planArgs = args.slice(1)
+      if (planArgs[0] === "set") {
+        await cmdPlanSet(parseArgs(planArgs.slice(1)))
+      } else {
+        await cmdPlan(
+          parseArgs(planArgs),
+          planArgs.filter((a) => !a.startsWith("-")),
+        )
+      }
       break
     case "ls":
       await cmdLs(opts)

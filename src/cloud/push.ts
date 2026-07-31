@@ -38,12 +38,16 @@ export async function push(opts: PushOptions): Promise<PushResult> {
   }
 
   const entries = fs.readdirSync(sessionsDir)
-  let sessionIDs = entries.filter((e) => {
+  let allDirs = entries.filter((e) => {
     try { return fs.statSync(path.join(sessionsDir, e)).isDirectory() } catch { return false }
   })
-  sessionIDs.sort()
+  allDirs.sort()
+
+  const isSession = (id: string) => fs.existsSync(path.join(sessionsDir, id, "info.json"))
+  let sessionIDs = allDirs.filter(isSession)
 
   if (opts.sessionID) {
+    allDirs = allDirs.filter((id) => id === opts.sessionID)
     sessionIDs = sessionIDs.filter((id) => id === opts.sessionID)
   }
 
@@ -54,9 +58,9 @@ export async function push(opts: PushOptions): Promise<PushResult> {
     throw new Error(`No saved sessions found for branch "${branch}" (${detail}). Save sessions first with \`boons session-save\`.`)
   }
 
-  for (const sessionID of sessionIDs) {
-    const localDir = path.join(sessionsDir, sessionID)
-    const remoteDir = path.posix.join(remoteBase, sessionID)
+  for (const dir of allDirs) {
+    const localDir = path.join(sessionsDir, dir)
+    const remoteDir = path.posix.join(remoteBase, dir)
     await provider.uploadDir(localDir, remoteDir)
   }
 

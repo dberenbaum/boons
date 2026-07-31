@@ -185,6 +185,8 @@ The repo key is derived from `git remote origin`, normalized to `host/org/repo`.
 boons session-read --tool <name> --session-id <id>     Read session messages as text
 boons session-save --tool <name> --summary <text>      Save session for current branch
   [--session-id <id>] [--file <path>...]
+boons plan [<name>] [--branch <b>] [--all] [--json]    List plans, or print latest content of one
+boons plan set --name <name> (--file <path> | --text)  Update a plan without resummarizing the session
 boons ls [--branch <name>] [--json]                    List saved sessions
 boons ls --remote [--branch <name>] [--json]           List remote sessions
 boons install [<tool>] [--project]                     Install skills (auto-detects if no tool specified)
@@ -211,6 +213,23 @@ boons worktree port <service>                          Show allocated port for a
 boons worktree env                                     Print worktree environment variables
 boons worktree prune                                   Remove stale registry entries
 ```
+
+## Plan tracking
+
+Living docs (plans, decisions, specs) survive worktrees and stale copies. Every file you
+attach with `boons session-save --file` is snapshotted into the session and recorded in that
+session's `plans.json` manifest. The latest version of each plan is always retrievable —
+even after the worktree is removed — because `boons plan` reconstructs it from session
+snapshots keyed by the current branch:
+
+- `boons plan` lists the latest of each plan on the branch
+- `boons plan <name>` prints the latest content
+- `boons plan set --name <name> --file <path>` or `--text "<content>"` updates a plan
+  without re-exporting or resummarizing the session
+
+`boons plan set` writes into the most recent session dir for the branch (creating a plan-only
+dir if no session exists yet). Pushing a branch also syncs plans to cloud, so teammates who
+`boons pull` get the current plan too.
 
 ## Prerequisites
 

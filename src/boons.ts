@@ -727,8 +727,9 @@ const BOONS_BLOCK = [
   "",
   "Also available: boons-session-load (prior context), boons-session-push (share",
   "to cloud), boons-session-pull (fetch from cloud), boons-pr-draft (PR",
-  "descriptions), boons-pr-review (PR reviews), boons-task (project task runner),",
-  "boons-worktree (worktree port coordination).",
+  "descriptions), boons-pr-review (PR reviews), boons-pr-learn (PR style",
+  "learning), boons-task (project task runner), boons-worktree (worktree port",
+  "coordination).",
   "<!-- /boons -->",
   "",
 ].join("\n")
@@ -1206,13 +1207,21 @@ Run \`boons pull\` when:
 function prDraftSkillContent(t: ToolInfo): string {
   return `---
 name: boons-pr-draft
-description: When drafting a PR, load boons session context from the branch to ground the description in session history.
+description: When drafting a PR, load boons session context and the PR profile to ground the description in session history and your writing style.
 ---
 
 ## What this does
 
-Guides the agent to use boons session artifacts when drafting a PR,
-so the description reflects the full narrative arc — not just the diff.
+Guides the agent to use boons session artifacts and the per-repo PR profile
+when drafting a PR, so the description reflects the full narrative arc and
+reads as if the human wrote it.
+
+## PR profile
+
+If a profile exists at \`~/.boons/profiles/<repo-key>/pr.md\` (see
+boons-pr-learn for how to derive \`<repo-key>\`), read it and follow it:
+content priorities, voice, length & structure, conventions. Let it constrain
+the draft — it encodes how you write on this project.
 
 ## Protocol
 
@@ -1222,18 +1231,30 @@ When the user asks you to draft a PR, create a PR, or write a PR description:
    (defaults to current branch)
 2. **Load context** — read \`summary.md\` from every session, and use
    \`boons plan [--branch <name>]\` to get the latest plan and decisions docs
-3. **Cross-reference** — identify what was settled, what changed direction
-   midstream, and what's still open
-4. **Draft** — produce a PR description with sections: what changed, why,
-   key decisions with rationale, alternatives considered, open questions
-5. **Present to the user** — do not post the PR automatically. Let the user
-   review and edit the draft.
+3. **Load the PR profile** — read \`~/.boons/profiles/<repo-key>/pr.md\`
+   if present, and follow it
+4. **Mine the conversation** — pull the user's own statements of what changed
+   and why from this session's discussion. Ground the description in their
+   wording and framing. Do not invent framing by synthesizing from plan.md —
+   plans describe intent for you, not what a reviewer needs to know
+5. **Draft** — write the description using the profile, with the change and
+   its importance first. Include only what a reviewer needs
+6. **Self-check** — before presenting, verify: content-first (the important
+   change leads), short (shorter than you think), and standalone (no
+   references to plans, sessions, or branch history the reviewer can't see)
+7. **Present to the user** — do not post the PR automatically. Let the user
+   review and edit the draft
 
-## Relationship to session-load
+## After the user edits
 
-This skill activates the "Drafting a PR description" protocol from the
-boons-session-load skill. Refer to boons-session-load for the full
-context-loading workflow.
+Whatever the user changes — words cut, sections reordered, tone shifts — is a
+lesson about how they write. Note the delta and hand it to boons-pr-learn at
+the next session-save; it consolidates these into the profile over time.
+
+## Relationship to other skills
+
+- boons-session-load provides the "Drafting a PR description" context workflow
+- boons-pr-learn maintains the profile this skill consumes
 `
 }
 
@@ -1272,6 +1293,113 @@ someone else's work:
 This skill activates the "Reviewing or understanding a branch" protocol
 from the boons-session-load skill. Refer to boons-session-load for the full
 context-loading workflow.
+`
+}
+
+function prLearnSkillContent(t: ToolInfo): string {
+  return `---
+name: boons-pr-learn
+description: Learn how you write PR descriptions on this project and improve them over time. Build a per-repo PR profile, capture your edits and phrasing, and refine it so future drafts read as if you wrote them.
+---
+
+## What this does
+
+Agent-drafted PR descriptions often read like agent output: too long, wrong
+emphasis, jargon, references to plans nobody else has seen. This skill fixes
+that by learning how **you** write PR descriptions on **this project** and
+storing it in a per-repo profile that improves with every draft you edit.
+
+This is the learning half of drafting: \`boons-pr-draft\` consumes the
+profile; this skill maintains it.
+
+## The PR profile
+
+Path: \`~/.boons/profiles/<repo-key>/pr.md\`
+
+Derive \`<repo-key>\` from the git remote:
+
+    git remote get-url origin
+
+Normalize the output: strip any \`scheme://\` and \`user@\`, change the \`:\` in
+\`git@github.com:owner/repo.git\` to \`/\`, and drop a trailing \`.git\`.
+Result: \`github.com/owner/repo\`.
+
+The profile has five sections:
+
+- **Content Priorities** — what the description must lead with and cover
+- **Voice** — how you explain and frame work on this project
+- **Length & Structure** — how long, how it's organized, formatting rules
+- **Conventions** — title format, template sections, review expectations
+- **State** — seed status, last-updated, and the pending observation log
+
+## Initialization (seed step)
+
+If the profile does not exist, or its \`State\` section is missing:
+
+1. **Ask the user once**: "Want me to build a PR profile from your PR history
+   here? It reads roughly the last ~10 merged PRs."
+2. If **yes**: pull the PRs with \`gh\` (\`gh pr list --state merged --limit 10\`,
+   then \`gh pr view <number>\` for each), extract recurring patterns for the
+   four content sections, and write the profile. Set \`seed: complete\`.
+3. If **no**: set \`seed: declined\` and skip. Do not ask again.
+4. If the repo has no merged PRs or \`gh\` is unavailable, set
+   \`seed: complete\` (nothing to learn) and continue.
+
+Start the content sections with reasonable defaults even when there is nothing
+to seed from: content-first, short, standalone.
+
+## Learning loop
+
+Learning is **implicit** — capture while you work, consolidate at checkpoints.
+
+### Capture (while working)
+
+Record an observation whenever you see one of these:
+
+- The user **edits** a drafted PR description — note what changed (words cut,
+  sections removed or reordered, tone shifts, added context)
+- The user **rewords** your phrasing or gives explicit framing guidance
+- The user **reacts** to a draft (accepts as-is, asks for a rewrite, calls out
+  a section)
+- A draft fails on a self-check and you know why
+
+Store observations in the profile's \`State\` observation log with a short
+date-stamp and the trigger. Keep each line concrete and attributable
+(e.g. \`2026-08-03: cut "alternatives considered" — user never reads it\`).
+
+### Consolidate (at session-save)
+
+When you run \`boons session-save\` (or are about to), update the profile:
+
+1. **Diff the final description** against your draft. The delta is the
+   strongest signal — the user's edits are their corrections.
+2. Promote an observation into its section once it has **2–3 supporting
+   occurrences** — that is a pattern, not a one-off. One occurrence stays in
+   the log.
+3. **Prune** the log: drop promoted entries and anything older than ~30 days
+   that never repeated.
+4. Update \`last-updated\`.
+
+Never ask the user to review the profile. It is a private scratch pad for
+your drafting behavior — refine it quietly and keep it concise.
+
+## Discipline
+
+- **Content first**: lead with the change and why it matters; add background
+  only if it changes understanding
+- **Short**: shorter than you think. The profile should trend toward less
+- **Standalone**: no references to plans, sessions, or branch history that a
+  reviewer cannot see
+- **Git conventions are out of scope**: commit messages and branch names are
+  already visible in the repo — do not learn them here
+- **Review learning is future work**: learning from review comments is a
+  weaker signal (you cannot reliably diff what the reviewer changed). Track
+  the idea but do not build it here
+
+## Relationship to other skills
+
+- \`boons-pr-draft\` reads this profile when drafting
+- \`boons-session-save\` is the natural consolidation checkpoint
 `
 }
 
@@ -1611,6 +1739,7 @@ async function writeSkills(t: ToolInfo, rootDir: string) {
     { name: "boons-session-pull", content: pullSkillContent(t) },
     { name: "boons-pr-draft", content: prDraftSkillContent(t) },
     { name: "boons-pr-review", content: prReviewSkillContent(t) },
+    { name: "boons-pr-learn", content: prLearnSkillContent(t) },
     { name: "boons-task", content: taskSkillContent() },
     { name: "boons-worktree", content: worktreeSkillContent(t) },
   ]

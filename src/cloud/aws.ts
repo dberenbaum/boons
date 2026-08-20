@@ -33,8 +33,8 @@ export class AwsStorage implements CloudStorage {
 
   async uploadDir(localDir: string, remoteDir: string): Promise<void> {
     const result = run([
-      "aws", "s3", "sync", localDir + "/", this.s3uri(remoteDir) + "/",
-      "--exact-timestamps", "--only-show-errors",
+      "aws", "--only-show-errors", "s3", "sync", localDir + "/", this.s3uri(remoteDir) + "/",
+      "--exact-timestamps",
     ])
     if (result.exitCode !== 0) {
       throw new Error(`aws s3 sync failed: ${result.stderr.trim() || `exit code ${result.exitCode}`}`)
@@ -43,8 +43,8 @@ export class AwsStorage implements CloudStorage {
 
   async downloadDir(remoteDir: string, localDir: string): Promise<void> {
     const result = run([
-      "aws", "s3", "sync", this.s3uri(remoteDir) + "/", localDir + "/",
-      "--exact-timestamps", "--only-show-errors",
+      "aws", "--only-show-errors", "s3", "sync", this.s3uri(remoteDir) + "/", localDir + "/",
+      "--exact-timestamps",
     ])
     if (result.exitCode !== 0) {
       throw new Error(`aws s3 sync failed: ${result.stderr.trim() || `exit code ${result.exitCode}`}`)
@@ -53,8 +53,7 @@ export class AwsStorage implements CloudStorage {
 
   async listDirs(remoteBase: string): Promise<string[]> {
     const result = run([
-      "aws", "s3", "ls", this.s3uri(remoteBase) + "/",
-      "--only-show-errors",
+      "aws", "--only-show-errors", "s3", "ls", this.s3uri(remoteBase) + "/",
     ])
     if (result.exitCode !== 0) {
       throw new Error(`aws s3 ls failed: ${result.stderr.trim() || `exit code ${result.exitCode}`}`)
@@ -69,8 +68,7 @@ export class AwsStorage implements CloudStorage {
 
   async downloadFile(remotePath: string, localPath: string): Promise<void> {
     const result = run([
-      "aws", "s3", "cp", this.s3uri(remotePath), localPath,
-      "--only-show-errors",
+      "aws", "--only-show-errors", "s3", "cp", this.s3uri(remotePath), localPath,
     ])
     if (result.exitCode !== 0) {
       throw new Error(`aws s3 cp failed: ${result.stderr.trim() || `exit code ${result.exitCode}`}`)
@@ -78,7 +76,7 @@ export class AwsStorage implements CloudStorage {
   }
 
   async checkConfig(): Promise<{ ok: boolean; error?: string }> {
-    const result = run(["aws", "s3", "ls", this.s3uri(""), "--only-show-errors"])
+    const result = run(["aws", "--only-show-errors", "s3", "ls", this.s3uri("")])
     if (result.exitCode !== 0) {
       return { ok: false, error: result.stderr.trim() || `exit code ${result.exitCode}` }
     }

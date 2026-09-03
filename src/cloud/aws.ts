@@ -53,7 +53,7 @@ export class AwsStorage implements CloudStorage {
 
   async listDirs(remoteBase: string): Promise<string[]> {
     const result = run([
-      "aws", "--only-show-errors", "s3", "ls", this.s3uri(remoteBase) + "/",
+      "aws", "s3", "ls", this.s3uri(remoteBase) + "/",
     ])
     if (result.exitCode !== 0) {
       throw new Error(`aws s3 ls failed: ${result.stderr.trim() || `exit code ${result.exitCode}`}`)
@@ -76,7 +76,7 @@ export class AwsStorage implements CloudStorage {
   }
 
   async checkConfig(): Promise<{ ok: boolean; error?: string }> {
-    const result = run(["aws", "--only-show-errors", "s3", "ls", this.s3uri("")])
+    const result = run(["aws", "s3", "ls", this.s3uri("")])
     if (result.exitCode !== 0) {
       return { ok: false, error: result.stderr.trim() || `exit code ${result.exitCode}` }
     }

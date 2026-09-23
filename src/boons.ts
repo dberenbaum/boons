@@ -28,16 +28,27 @@ import {
   writeGlobalConfig,
   readGlobalConfig,
   getRepoKey,
+  getRepoKeyOrLocal,
   resolveConfig,
   push,
   pull,
   listRemote,
   getSessionsDir,
   getSessionsBranchDir,
+  getSessionsBranchDirForKey,
+  getSessionsDirForKey,
+  listRepoKeys,
+  listBranches,
+  resolveRepoKey,
+  normalizeRepoKey,
 } from "./cloud"
 import { getBranch } from "./git"
+import type { PlanDoc } from "./plan"
 import {
   collectPlans,
+  collectAllPlans,
+  collectPlansForKey,
+  findPlansByName,
   readManifest,
   snapshotFiles,
   writePlan,
@@ -148,8 +159,12 @@ Usage:
   boons plan [<name>] [--branch <b>] [--all] [--json]  List plans, or print latest content of one
   boons plan set --name <name> (--file <path> | --text "<content>")
                                                         Update a plan without resummarizing the session
+  boons plan [<name>] --repo <key|url> [--branch <b>]   Read plans from another repo (local sessions)
+  boons plan [<name>] --all-repos [--branch <b>]        Search plans across every local repo
   boons ls [--branch <name>] [--json]                   List saved sessions
+  boons ls [--repo <key|url>] [--all-repos] [--json]   List sessions in another repo / all repos
   boons ls --remote [--branch <name>] [--json]          List remote sessions
+  boons ls --remote [--repo <key|url>] [--branch <name>] List remote sessions of another repo
    boons install [<tool>]                               Install skills (auto-detects if no tool given)
    boons install [<tool>] --project                     Install skills scoped to the project
   boons remote                                          Show remote config, or prompt if none
@@ -157,6 +172,7 @@ Usage:
    boons remote --project --provider aws|gcp|azure ...   Configure cloud remote per-repo (stored in global config)
   boons push [--session-id <id>] [--branch <b>]         Push sessions to cloud
    boons pull [--session-id <id>] [--branch <b>]         Pull sessions from cloud
+   boons pull [--repo <key|url>] [--branch <b>]          Pull another repo's sessions to search them locally
     boons task [<name>] [--verbose] [-- <args>...]      Run a task script (default: setup.sh); pass args after --
     boons task list                                      List available task scripts
     boons task check                                     Print task scripts without running
@@ -192,6 +208,8 @@ Options:
   --name <name>       Plan name (default: file basename, for plan set)
   --text <content>    Plan content to store (for plan set; alternative to --file)
   --all               Include non-plan tracked docs in the plan listing (for plan list)
+  --all-repos         Search every locally stored repo and branch (for plan list / ls)
+  --repo <key|url>    Target another repo by key (host/org/repo) or raw remote URL
   --branch <name>     Filter by branch (default: current branch)
    --global            Install globally (default; use --project for project-scoped skills)
   --json              Output as JSON (for tool integration)
@@ -243,40 +261,184 @@ async function cmdSessionSave(args: Record<string, string>, extraFiles: string[]
   }
 }
 
+function readDocContent(doc: PlanDoc): string {
+  return fs.readFileSync(doc.path, "utf-8")
+}
+
+function printDocWithOrigin(doc: PlanDoc): void {
+  process.stdout.write(`# ${doc.name} — ${doc.repoKey ?? "?"}/${doc.branch ?? "?"}\n`)
+  process.stdout.write(`# session ${doc.sessionID}, saved ${doc.savedAt}\n\n`)
+  const content = readDocContent(doc)
+  process.stdout.write(content.endsWith("\n") ? content : content + "\n")
+}
+
+function table(headers: string[], rows: string[][]): void {
+  const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)))
+  const header = headers.map((h, i) => h.padEnd(widths[i])).join("  ")
+  console.log(header)
+  console.log("─".repeat(header.length))
+  for (const row of rows) {
+    console.log(row.map((c, i) => c.padEnd(widths[i])).join("  ").trimEnd())
+  }
+}
+
+function printPlanTable(docs: PlanDoc[], crossRepo: boolean): void {
+  if (docs.length === 0) return
+  const headers = crossRepo
+    ? ["Name", "Kind", "Repo", "Branch", "Session", "Saved"]
+    : ["Name", "Kind", "Session", "Saved"]
+  const rows = docs.map((d) =>
+    crossRepo
+      ? [
+          d.name,
+          d.kind,
+          d.repoKey ?? "",
+          d.branch ?? "",
+          d.sessionID.length > 26 ? d.sessionID.slice(0, 23) + "..." : d.sessionID,
+          d.savedAt,
+        ]
+      : [
+          d.name,
+          d.kind,
+          d.sessionID.length > 26 ? d.sessionID.slice(0, 23) + "..." : d.sessionID,
+          d.savedAt,
+        ],
+  )
+  table(headers, rows)
+}
+
+function showPlanMissHints(name: string): void {
+  // Search every repo *and* branch — finding the plan elsewhere is the point.
+  const matches = findPlansByName(name)
+  if (matches.length === 0) {
+    console.log("Searched every locally stored repo. Try `boons plan --all-repos` to list what exists.")
+    return
+  }
+  console.log(`Found in ${matches.length} other location(s):`)
+  table(
+    ["Repo", "Branch", "Kind", "Saved"],
+    matches.slice(0, 5).map((m) => [m.repoKey ?? "", m.branch ?? "", m.kind, m.savedAt]),
+  )
+  const first = matches[0]
+  console.log(
+    `Read it with: boons plan ${name} --repo ${first.repoKey} --branch ${first.branch}`,
+  )
+}
+
 async function cmdPlan(
   args: Record<string, string | string[]>,
   positional: string[],
 ) {
   const cwd = process.cwd()
-  const branch = (args["--branch"] as string) ?? getBranch(cwd)
   const asJson = args["--json"] === "true"
   const all = args["--all"] === "true"
+  const allRepos = args["--all-repos"] === "true"
   const sessionID = args["--session-id"] as string | undefined
+  const branchFlag = args["--branch"] as string | undefined
+  const repoFlag = args["--repo"] as string | undefined
   const name = positional[0] ?? (args["--name"] as string | undefined)
+  const crossRepo = allRepos || !!repoFlag
 
-  let docs = collectPlans(branch, cwd)
+  if (allRepos && repoFlag) {
+    console.error("Use either --repo <key> or --all-repos, not both.")
+    process.exit(1)
+  }
+
+  const branch = branchFlag ?? (allRepos ? undefined : getBranch(cwd))
+  let docs: PlanDoc[]
+  // Repo the reads are addressed to; --session-id must resolve against the
+  // same scope as the rest of the command.
+  let scopedKey: string | null = null
+
+  if (allRepos) {
+    docs = collectAllPlans({ branch })
+  } else if (repoFlag) {
+    const { key, known } = resolveRepoKey(repoFlag)
+    if (!key) {
+      console.error("--repo requires a repo key or remote URL (e.g. --repo github.com/org/repo).")
+      process.exit(1)
+    }
+    if (!known) {
+      console.error(`No local sessions for "${key}".`)
+      console.log(`To search that repo's remote data: boons ls --remote --repo ${key} --branch <branch>`)
+      console.log(`  then boons pull --repo ${key} --branch <branch>`)
+      process.exit(1)
+    }
+    const targetBranch = branch ?? getBranch(cwd)
+    docs = collectPlansForKey(key, targetBranch)
+    scopedKey = key
+    if (docs.length === 0 && !branchFlag) {
+      const branches = listBranches(key)
+      if (branches.length > 0) {
+        console.error(`No plans on branch "${targetBranch}" of "${key}".`)
+        console.log(`Branches with sessions: ${branches.join(", ")}`)
+        console.log(`Try: boons plan --repo ${key} --branch <branch> — or boons plan --all-repos`)
+        process.exit(1)
+      }
+    }
+  } else {
+    docs = collectPlans(branch as string, cwd)
+  }
+
   if (sessionID) {
-    const sessionDir = path.join(getSessionsBranchDir(branch, cwd), sessionID)
-    docs = readManifest(sessionDir).map((e) => ({
+    const dir = scopedKey
+      ? path.join(getSessionsBranchDirForKey(scopedKey, branch as string), sessionID)
+      : path.join(getSessionsBranchDir(branch as string, cwd), sessionID)
+    docs = readManifest(dir).map((e) => ({
       ...e,
       sessionID,
-      path: path.join(sessionDir, e.file),
+      path: path.join(dir, e.file),
+      repoKey: scopedKey ?? getRepoKeyOrLocal(cwd).key,
+      branch,
     }))
   }
+
   if (!all) docs = docs.filter((d) => d.kind === "plan")
 
   if (name) {
-    const doc = docs.find((d) => d.name === name)
-    if (!doc) {
-      console.error(`No plan "${name}" found on branch "${branch}".`)
+    const matches = docs.filter((d) => d.name === name)
+    if (matches.length === 0) {
+      if (asJson) {
+        console.log(JSON.stringify([]))
+      } else {
+        const where = crossRepo
+          ? " in the requested scope"
+          : ` on branch "${branch}" of "${getRepoKeyOrLocal(cwd).key}"`
+        console.error(`No plan "${name}" found${where}.`)
+        if (!repoFlag) showPlanMissHints(name)
+      }
       process.exit(1)
     }
+    // Newest wins across the searched scope; ambiguity in cross-repo mode is
+    // surfaced by listing all matches instead of silently picking one.
+    if (matches.length > 1 && allRepos) {
+      if (asJson) {
+        console.log(JSON.stringify(matches, null, 2))
+        return
+      }
+      // Informational, not an error — keep it on stdout with the table.
+      console.log(`"${name}" exists in ${matches.length} locations:`)
+      printPlanTable(matches, true)
+      console.log(
+        `Read one with: boons plan ${name} --repo <repo> --branch <branch>`,
+      )
+      return
+    }
+    const doc = matches[0]
     let content: string
     try {
-      content = fs.readFileSync(doc.path, "utf-8")
+      content = readDocContent(doc)
     } catch {
       console.error(`Plan file missing: ${doc.path}`)
       process.exit(1)
+    }
+    if (asJson) {
+      console.log(JSON.stringify(doc, null, 2))
+      return
+    }
+    if (allRepos || repoFlag) {
+      printDocWithOrigin(doc)
+      return
     }
     process.stdout.write(content.endsWith("\n") ? content : content + "\n")
     return
@@ -288,30 +450,20 @@ async function cmdPlan(
   }
 
   if (docs.length === 0) {
-    console.log(`No plans found on branch "${branch}".`)
+    if (allRepos) {
+      console.log("No plans found in any locally stored repo.")
+    } else if (repoFlag) {
+      console.log(`No plans found for "${normalizeRepoKey(repoFlag as string)}" on branch "${branch}".`)
+    } else {
+      console.log(`No plans found on branch "${branch}".`)
+    }
+    if (!crossRepo) {
+      console.log(`Search other repos with: boons plan --all-repos`)
+    }
     return
   }
 
-  const nameWidth = Math.max(...docs.map((d) => d.name.length), 4)
-  const kindWidth = Math.max(...docs.map((d) => d.kind.length), 4)
-  const header = [
-    "Name".padEnd(nameWidth),
-    "Kind".padEnd(kindWidth),
-    "Session".padEnd(28),
-    "Saved",
-  ].join("  ")
-  console.log(header)
-  console.log("─".repeat(header.length))
-  for (const d of docs) {
-    console.log(
-      [
-        d.name.padEnd(nameWidth),
-        d.kind.padEnd(kindWidth),
-        d.sessionID.length > 26 ? d.sessionID.slice(0, 23) + "..." : d.sessionID.padEnd(28),
-        d.savedAt,
-      ].join("  "),
-    )
-  }
+  printPlanTable(docs, crossRepo)
 }
 
 async function cmdPlanSet(args: Record<string, string | string[]>) {
@@ -416,6 +568,77 @@ async function cmdSessionRead(args: Record<string, string>) {
   }
 }
 
+interface SessionRow {
+  repoKey: string
+  branch: string
+  sessionID: string
+  name: string
+  author: string
+  created: string
+  messageCount: number | null
+  files: string[]
+}
+
+async function collectLocalSessions(
+  boonsDir: string,
+  repoKey: string,
+  branchFilter?: string,
+): Promise<SessionRow[]> {
+  const rows: SessionRow[] = []
+  if (!fs.existsSync(boonsDir)) return rows
+
+  const glob = new Glob("**/info.json")
+  const scan = glob.scan(boonsDir)
+  for await (const file of scan) {
+    const parts = file.split("/")
+    const branch = parts.slice(0, -2).join("/")
+    const sessionID = parts[parts.length - 2]
+
+    if (branchFilter && branch !== branchFilter) continue
+
+    const sessionPath = path.join(boonsDir, branch, sessionID)
+    let info: { name?: string; author?: string; created?: string; messageCount?: number }
+    try {
+      info = JSON.parse(await Bun.file(path.join(sessionPath, "info.json")).text())
+    } catch {
+      continue
+    }
+
+    const entries = fs.readdirSync(sessionPath)
+    const extras = entries.filter(
+      (f) => f !== "info.json" && f !== "raw.jsonl" && f !== "plans.json",
+    )
+
+    rows.push({
+      repoKey,
+      branch,
+      sessionID,
+      name: info.name ?? "",
+      author: info.author ?? "",
+      created: info.created ? new Date(info.created).toISOString() : "",
+      messageCount: info.messageCount ?? null,
+      files: extras,
+    })
+  }
+
+  return rows.sort((a, b) => a.branch.localeCompare(b.branch) || a.sessionID.localeCompare(b.sessionID))
+}
+
+function printSessionTable(rows: SessionRow[], crossRepo: boolean): void {
+  if (rows.length === 0) return
+  const headers = crossRepo
+    ? ["Repo", "Branch", "Session ID", "Name", "Msgs", "Author", "Files"]
+    : ["Branch", "Session ID", "Name", "Msgs", "Author", "Files"]
+  const tableRows = rows.map((r) => {
+    const sid = r.sessionID.length > 26 ? r.sessionID.slice(0, 23) + "..." : r.sessionID
+    const tail = [r.name, (r.messageCount?.toString() ?? "?"), r.author, r.files.join(", ")]
+    return crossRepo
+      ? [r.repoKey, r.branch, sid, ...tail]
+      : [r.branch, sid, ...tail]
+  })
+  table(headers, tableRows)
+}
+
 async function cmdLs(args: Record<string, string>) {
   const cwd = process.cwd()
   const doRemote = args["--remote"] === "true"
@@ -425,55 +648,44 @@ async function cmdLs(args: Record<string, string>) {
     return
   }
 
-  const boonsDir = getSessionsDir(cwd)
   const branchFilter = args["--branch"]
   const asJson = args["--json"] === "true"
+  const allRepos = args["--all-repos"] === "true"
+  const repoFlag = args["--repo"]
 
-  if (!fs.existsSync(boonsDir)) {
-    console.log("No saved sessions found.")
-    return
+  if (allRepos && repoFlag) {
+    console.error("Use either --repo <key> or --all-repos, not both.")
+    process.exit(1)
   }
 
-  const rows: {
-    branch: string
-    sessionID: string
-    name: string
-    author: string
-    created: string
-    messageCount: number | null
-    files: string[]
-  }[] = []
+  let rows: SessionRow[]
 
-  const glob = new Glob("**/info.json")
-
-  for await (const file of glob.scan(boonsDir)) {
-    const parts = file.split("/")
-    const branch = parts.slice(0, -2).join("/")
-    const sessionID = parts[parts.length - 2]
-
-    if (branchFilter && branch !== branchFilter) continue
-
-    const sessionPath = path.join(boonsDir, branch, sessionID)
-    const info = JSON.parse(
-      await Bun.file(path.join(sessionPath, "info.json")).text(),
-    )
-
-    const entries = fs.readdirSync(sessionPath)
-    const extras = entries.filter(
-      (f) => f !== "info.json" && f !== "raw.jsonl" && f !== "plans.json",
-    )
-
-    rows.push({
-      branch,
-      sessionID,
-      name: info.name ?? "",
-      author: info.author ?? "",
-      created: info.created
-        ? new Date(info.created).toISOString()
-        : "",
-      messageCount: info.messageCount ?? null,
-      files: extras,
-    })
+  if (allRepos) {
+    const keys = listRepoKeys()
+    if (keys.length === 0) {
+      console.log("No saved sessions found in any local repo.")
+      return
+    }
+    rows = []
+    for (const key of keys) {
+      rows.push(...(await collectLocalSessions(getSessionsDirForKey(key), key, branchFilter)))
+    }
+  } else if (repoFlag) {
+    const { key, known } = resolveRepoKey(repoFlag)
+    if (!key) {
+      console.error("--repo requires a repo key or remote URL (e.g. --repo github.com/org/repo).")
+      process.exit(1)
+    }
+    if (!known) {
+      console.error(`No local sessions for "${key}".`)
+      console.log(`To search that repo's remote data: boons ls --remote --repo ${key} --branch <branch>`)
+      console.log(`  then boons pull --repo ${key} --branch <branch>`)
+      process.exit(1)
+    }
+    rows = await collectLocalSessions(getSessionsDirForKey(key), key, branchFilter)
+  } else {
+    const { key } = getRepoKeyOrLocal(cwd)
+    rows = await collectLocalSessions(getSessionsDir(cwd), key, branchFilter)
   }
 
   if (asJson) {
@@ -482,49 +694,29 @@ async function cmdLs(args: Record<string, string>) {
   }
 
   if (rows.length === 0) {
-    console.log("No saved sessions found.")
+    if (repoFlag) {
+      console.log(`No saved sessions for "${normalizeRepoKey(repoFlag as string)}"${branchFilter ? ` on branch "${branchFilter}"` : ""}.`)
+    } else if (allRepos) {
+      console.log("No saved sessions found in any local repo.")
+    } else {
+      console.log("No saved sessions found.")
+    }
+    if (!allRepos) {
+      console.log("Search other repos with: boons ls --all-repos")
+    }
     return
   }
 
-  const branchWidth = Math.max(...rows.map((r) => r.branch.length), 6)
-  const nameWidth = Math.max(...rows.map((r) => r.name.length), 4)
-  const authorWidth = Math.max(...rows.map((r) => r.author.length), 6)
-
-  const header = [
-    "Branch".padEnd(branchWidth),
-    "Session ID".padEnd(28),
-    "Name".padEnd(nameWidth),
-    "Msgs".padEnd(5),
-    "Author".padEnd(authorWidth),
-    "Files",
-  ].join("  ")
-
-  console.log(header)
-  console.log("─".repeat(header.length))
-
-  for (const r of rows) {
-    const sid = r.sessionID.length > 26
-      ? r.sessionID.slice(0, 23) + "..."
-      : r.sessionID
-    console.log(
-      [
-        r.branch.padEnd(branchWidth),
-        sid.padEnd(28),
-        r.name.padEnd(nameWidth),
-        (r.messageCount?.toString() ?? "?").padEnd(5),
-        r.author.padEnd(authorWidth),
-        r.files.join(", "),
-      ].join("  "),
-    )
-  }
+  printSessionTable(rows, allRepos || !!repoFlag)
 }
 
 async function cmdLsRemote(args: Record<string, string>) {
   const asJson = args["--json"] === "true"
   const branch = args["--branch"]
+  const repoKey = args["--repo"]
 
   try {
-    const sessions = await listRemote({ branch })
+    const sessions = await listRemote({ branch, repoKey })
 
     if (asJson) {
       console.log(JSON.stringify(sessions, null, 2))
@@ -729,6 +921,10 @@ const BOONS_BLOCK = [
   "to cloud), boons-session-pull (fetch from cloud), boons-pr-draft (PR",
   "descriptions), boons-pr-review (PR reviews), boons-task (project task runner),",
   "boons-worktree (worktree port coordination).",
+  "",
+  "Context may span repos: `boons plan --all-repos` and `boons ls --all-repos`",
+  "search every repo stored on this machine, and `--repo <key|url>` targets one.",
+  "Use boons to save plans and find plans, in any repo.",
   "<!-- /boons -->",
   "",
 ].join("\n")
@@ -993,6 +1189,22 @@ When a plan changes between saves, update it in place (no resummarizing):
 Plans are keyed by name; the latest \`boons plan set\` or \`session-save\`
 wins. A fresh session can load the current plan with \`boons plan plan.md\`.
 
+## Save plans to boons, not just the working tree
+
+A plan is only discoverable if it is saved to boons. Every plan or spec
+you produce must be written with \`boons plan set --name <name> --file <path>\`
+during the work, or with \`session-save --file <path>\` at the save point.
+
+A plan.md left only in the working tree is invisible to \`boons plan\` — and to
+the cross-repo search that agents in other repos rely on (see
+boons-session-load). Saving to boons is what makes the plan findable in this
+repo's next session, and in every other repo on this machine.
+
+When the work involves more than one repo, name the plan for what it covers
+(e.g. \`auth-rollout.md\`) and save it with boons. Agents in the other repo
+will find it with \`boons plan <name> --all-repos\`, so the plan never needs
+to be copied or re-explained.
+
 You may also optionally create:
 
 - \`plan.md\` — if the session included planning or design discussions,
@@ -1052,6 +1264,35 @@ Always check \`boons plan\` for the current plan before starting work,
 and prefer the plan it returns over a plan.md in the working tree
 (which may be stale or missing in a deleted worktree).
 
+If \`boons plan <name>\` misses, boons tells you which other repo and
+branch holds it — read it from there.
+
+## Work spanning multiple repos
+
+Sessions and plans are stored per repo on this machine, but most work
+(coordinating changes, shared protocols, cross-cutting features) spans
+several. When the current repo's context is thin, missing, or the user
+mentions another repo, search across repos instead of asking the user
+where to look:
+
+- \`boons plan --all-repos\` — every plan stored on this machine, newest
+  first, with repo and branch columns
+- \`boons plan <name> --all-repos\` — find a plan by name anywhere; prints
+  it with its \`<repo>/<branch>\` origin header
+- \`boons ls --all-repos\` — sessions across all repos
+- \`boons plan --repo <key|url> [--branch <b>]\` / \`boons ls --repo <key|url>\`
+  — target one repo. \`<key>\` is \`host/org/repo\`; a raw remote URL works too
+
+These search locally. If another repo's data is not on this machine, fetch
+it first: \`boons ls --remote --repo <key> --branch <b>\` then
+\`boons pull --repo <key> --branch <b>\`, then search.
+
+Do this when: the task mentions another repo or service, the user refers to
+work done "elsewhere" or "in the other repo", the local branch has no prior
+sessions, or the current repo's plans clearly don't cover the request.
+Read other repos' plans and summaries before asking the user to repeat
+context they have already saved.
+
 ## Protocols
 
 ### On branch checkout or creation
@@ -1070,6 +1311,9 @@ existing context:
 5. If the new branch has no sessions, check for sessions on the branch
    you came from or on \`main\`/\`master\`. Run \`boons ls --branch <name>\`
    to discover relevant context.
+6. If the user mentions another repo, or the branch story looks
+   incomplete, run \`boons plan --all-repos\` and \`boons ls --all-repos\`
+   to see whether related work is documented in a sibling repo.
 
 This gives the user a running start — they don't have to re-explain
 where things stand.
@@ -1082,7 +1326,9 @@ When the user begins describing a new task or feature to work on:
 2. Read \`summary.md\` from every session — don't assume the most
    recent session covers it. Skim all summaries to find context
    relevant to the new task.
-3. Use that context to ground your response — don't act like a blank
+3. If the task spans repos, or the local summaries don't explain the
+   request, run \`boons plan --all-repos\` and \`boons ls --all-repos\`
+4. Use that context to ground your response — don't act like a blank
    slate. Reference prior decisions and open questions so the work
    feels continuous.
 
@@ -1119,7 +1365,9 @@ When the user asks about a specific feature, bug, or decision:
    matching the topic
 3. If no match found, search other branches with
    \`boons ls --branch <name>\` and skim their summaries
-4. For promising sessions, read \`raw.jsonl\` for full detail
+4. Still nothing? Search every repo with \`boons plan --all-repos\` and
+   \`boons ls --all-repos\` — the context may be in a sibling repo
+5. For promising sessions, read \`raw.jsonl\` for full detail
 
 If \`summary.md\` files are sparse and \`raw.jsonl\` exists, you may
 read the raw logs directly to fill in gaps — but prefer summaries
@@ -1715,15 +1963,20 @@ async function cmdPull(args: Record<string, string>) {
   const asJson = args["--json"] === "true"
   const sessionID = args["--session-id"]
   const branch = args["--branch"]
+  const repoKey = args["--repo"]
 
   try {
-    const result = await pull({ sessionID, branch })
+    const result = await pull({ sessionID, branch, repoKey })
     if (asJson) {
       console.log(JSON.stringify(result))
     } else {
-      console.log(`Pulled ${result.pulled} session(s) for branch "${result.branch}"`)
+      const scope = repoKey ? `"${result.repoKey}"` : "this repo"
+      console.log(`Pulled ${result.pulled} session(s) for branch "${result.branch}" of ${scope}`)
       for (const s of result.sessions) {
         console.log(`  ${s}`)
+      }
+      if (repoKey) {
+        console.log(`Now searchable with: boons ls --repo ${result.repoKey} --branch ${result.branch} (or boons plan --all-repos)`)
       }
     }
   } catch (err) {
@@ -1914,6 +2167,21 @@ function parseArgs(args: string[]): Record<string, string | string[]> {
   return opts
 }
 
+/** Positional arguments only — flag values must not be mistaken for them. */
+function positionalArgs(args: string[]): string[] {
+  const positionals: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
+    if (a.startsWith("--")) {
+      const val = args[i + 1]
+      if (val !== undefined && !val.startsWith("-")) i++
+    } else {
+      positionals.push(a)
+    }
+  }
+  return positionals
+}
+
 async function main() {
   const args = process.argv.slice(2)
 
@@ -1939,10 +2207,7 @@ async function main() {
       if (planArgs[0] === "set") {
         await cmdPlanSet(parseArgs(planArgs.slice(1)))
       } else {
-        await cmdPlan(
-          parseArgs(planArgs),
-          planArgs.filter((a) => !a.startsWith("-")),
-        )
+        await cmdPlan(parseArgs(planArgs), positionalArgs(planArgs))
       }
       break
     case "ls":

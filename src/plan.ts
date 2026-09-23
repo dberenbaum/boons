@@ -1,6 +1,12 @@
 import * as path from "path"
 import * as fs from "fs"
-import { getSessionsBranchDir } from "./cloud/config"
+import {
+  getSessionsBranchDir,
+  getSessionsBranchDirForKey,
+  getRepoKeyOrLocal,
+  listRepoKeys,
+  listBranches,
+} from "./cloud/config"
 
 export type PlanKind = "plan" | "doc"
 
@@ -15,6 +21,10 @@ export interface PlanEntry {
 export interface PlanDoc extends PlanEntry {
   sessionID: string
   path: string
+  /** Repo key this doc was found under. Set for all collection helpers. */
+  repoKey?: string
+  /** Branch this doc was found on. Set for all collection helpers. */
+  branch?: string
 }
 
 export const MANIFEST_FILE = "plans.json"
@@ -54,8 +64,11 @@ export function snapshotFiles(sessionDir: string, filePaths: string[], kind: Pla
   }
 }
 
-export function collectPlans(branch: string, cwd?: string): PlanDoc[] {
-  const branchDir = getSessionsBranchDir(branch, cwd)
+function collectFromBranchDir(
+  branchDir: string,
+  repoKey: string,
+  branch: string,
+): PlanDoc[] {
   const latest = new Map<string, PlanDoc>()
   for (const sessionID of listSessionDirs(branchDir)) {
     const sessionDir = path.join(branchDir, sessionID)
@@ -64,6 +77,8 @@ export function collectPlans(branch: string, cwd?: string): PlanDoc[] {
         ...entry,
         sessionID,
         path: path.join(sessionDir, entry.file),
+        repoKey,
+        branch,
       }
       const existing = latest.get(entry.name)
       if (
@@ -78,8 +93,70 @@ export function collectPlans(branch: string, cwd?: string): PlanDoc[] {
   return [...latest.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 
+export function collectPlans(branch: string, cwd?: string, baseDir?: string): PlanDoc[] {
+  const { key } = getRepoKeyOrLocal(cwd)
+  return collectPlansForKey(key, branch, baseDir)
+}
+
+/** Latest version of each tracked doc on a branch of an explicit repo key. */
+export function collectPlansForKey(
+  repoKey: string,
+  branch: string,
+  baseDir?: string,
+): PlanDoc[] {
+  return collectFromBranchDir(
+    getSessionsBranchDirForKey(repoKey, branch, baseDir),
+    repoKey,
+    branch,
+  )
+}
+
+export interface CollectAllOptions {
+  branch?: string
+  baseDir?: string
+  repoKeys?: string[]
+}
+
+/**
+ * Latest version of each tracked doc across every locally stored repo — and,
+ * when no branch is given, across every branch. Sorted most recent first.
+ */
+export function collectAllPlans(opts: CollectAllOptions = {}): PlanDoc[] {
+  const keys = opts.repoKeys ?? listRepoKeys(opts.baseDir)
+  const docs: PlanDoc[] = []
+  for (const repoKey of keys) {
+    const branches = opts.branch
+      ? [opts.branch]
+      : listBranches(repoKey, opts.baseDir)
+    for (const branch of branches) {
+      docs.push(...collectPlansForKey(repoKey, branch, opts.baseDir))
+    }
+  }
+  return docs.sort((a, b) => b.savedAt.localeCompare(a.savedAt))
+}
+
+/** Every place a plan with this name is stored, newest first. */
+export function findPlansByName(
+  name: string,
+  opts: CollectAllOptions = {},
+): PlanDoc[] {
+  return collectAllPlans(opts).filter((d) => d.name === name)
+}
+
 export function resolvePlan(branch: string, name: string, cwd?: string): PlanDoc | null {
   return collectPlans(branch, cwd).find((d) => d.name === name) ?? null
+}
+
+/** Latest plan with this name on a branch of an explicit repo key. */
+export function resolvePlanForKey(
+  repoKey: string,
+  branch: string,
+  name: string,
+  baseDir?: string,
+): PlanDoc | null {
+  return (
+    collectPlansForKey(repoKey, branch, baseDir).find((d) => d.name === name) ?? null
+  )
 }
 
 export interface WritePlanOptions {

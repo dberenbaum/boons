@@ -51,6 +51,31 @@ export function writeGlobalConfig(config: GlobalConfig): void {
   fs.writeFileSync(cp, JSON.stringify(config, null, 2) + "\n")
 }
 
+/**
+ * Normalize a git remote URL to a `host/org/repo` key.
+ * Accepts HTTPS, SSH (`git@host:org/repo.git`), and already-normalized keys.
+ */
+export function normalizeRepoKey(input: string): string {
+  let url = input.trim()
+
+  const protoIdx = url.indexOf("://")
+  if (protoIdx >= 0) url = url.slice(protoIdx + 3)
+
+  const atIdx = url.indexOf("@")
+  if (atIdx >= 0) url = url.slice(atIdx + 1)
+
+  const firstSlash = url.indexOf("/")
+  const colonIdx = url.indexOf(":")
+  if (colonIdx >= 0 && (firstSlash < 0 || colonIdx < firstSlash)) {
+    url = url.slice(0, colonIdx) + "/" + url.slice(colonIdx + 1)
+  }
+
+  if (url.endsWith(".git")) url = url.slice(0, -4)
+  if (url.endsWith("/")) url = url.slice(0, -1)
+
+  return url
+}
+
 export function getRepoKey(cwd?: string): string | null {
   try {
     const result = Bun.spawnSync(
@@ -58,24 +83,7 @@ export function getRepoKey(cwd?: string): string | null {
       { cwd: cwd ?? process.cwd() },
     )
     if (result.exitCode !== 0) return null
-    let url = result.stdout.toString().trim()
-
-    const protoIdx = url.indexOf("://")
-    if (protoIdx >= 0) url = url.slice(protoIdx + 3)
-
-    const atIdx = url.indexOf("@")
-    if (atIdx >= 0) url = url.slice(atIdx + 1)
-
-    const firstSlash = url.indexOf("/")
-    const colonIdx = url.indexOf(":")
-    if (colonIdx >= 0 && (firstSlash < 0 || colonIdx < firstSlash)) {
-      url = url.slice(0, colonIdx) + "/" + url.slice(colonIdx + 1)
-    }
-
-    if (url.endsWith(".git")) url = url.slice(0, -4)
-    if (url.endsWith("/")) url = url.slice(0, -1)
-
-    return url
+    return normalizeRepoKey(result.stdout.toString())
   } catch {
     return null
   }
@@ -141,6 +149,154 @@ export function getSessionsDir(cwd?: string, baseDir?: string): string {
 
 export function getSessionsBranchDir(branch: string, cwd?: string, baseDir?: string): string {
   return path.join(getSessionsDir(cwd, baseDir), branch)
+}
+
+/** Sessions dir for an explicit repo key — no git or cwd required. */
+export function getSessionsDirForKey(repoKey: string, baseDir?: string): string {
+  return path.join(boonsDataDir(baseDir), SESSIONS_DIR_NAME, repoKey)
+}
+
+/** Branch-scoped sessions dir for an explicit repo key. */
+export function getSessionsBranchDirForKey(
+  repoKey: string,
+  branch: string,
+  baseDir?: string,
+): string {
+  return path.join(getSessionsDirForKey(repoKey, baseDir), branch)
+}
+
+function isDirectory(p: string): boolean {
+  try {
+    return fs.statSync(p).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The layout `sessions/<repoKey>/<branch>/<session-id>/` is ambiguous because
+ * repo keys and branch names can both contain slashes. Two signals resolve it:
+ * sessions are the only level that contains files, and every exported session
+ * records its full branch name in `info.json` — so a branch like `feat/auth`
+ * can be recognized from its first path segment.
+ */
+function isSessionDir(dir: string): boolean {
+  let entries: string[]
+  try {
+    entries = fs.readdirSync(dir)
+  } catch {
+    return false
+  }
+  return entries.some((e) => !isDirectory(path.join(dir, e)))
+}
+
+function childDirs(dir: string): string[] {
+  try {
+    return fs.readdirSync(dir).filter((e) => isDirectory(path.join(dir, e)))
+  } catch {
+    return []
+  }
+}
+
+/** A branch dir directly contains at least one session dir. */
+function isBranchDir(dir: string): boolean {
+  return childDirs(dir).some((c) => isSessionDir(path.join(dir, c)))
+}
+
+/** Branch name recorded by a session anywhere under `dir`, if any. */
+function descendantSessionBranch(dir: string): string | null {
+  for (const child of childDirs(dir)) {
+    const childPath = path.join(dir, child)
+    if (isSessionDir(childPath)) {
+      try {
+        const info = JSON.parse(
+          fs.readFileSync(path.join(childPath, "info.json"), "utf-8"),
+        ) as { branch?: string }
+        if (info.branch) return info.branch
+      } catch {
+        // plan-only or unreadable session — fall through to heuristics
+      }
+      continue
+    }
+    const found = descendantSessionBranch(childPath)
+    if (found) return found
+  }
+  return null
+}
+
+/** Does `name` name the first segment of a branch inside `dir`? */
+function isBranchRoot(dir: string, name: string): boolean {
+  if (isBranchDir(dir)) return true
+  const branch = descendantSessionBranch(dir)
+  return branch ? branch.startsWith(`${name}/`) : false
+}
+
+/**
+ * Find repo roots: a directory is a repo root as soon as one of its children
+ * starts a branch. Repo keys and branch names are both slash-separated, so
+ * without that marker the walk would descend into the branch.
+ */
+function findRepoRoots(dir: string, prefix: string, out: string[]): void {
+  const children = childDirs(dir)
+  if (children.length === 0) return
+  if (children.some((c) => isBranchRoot(path.join(dir, c), c))) {
+    out.push(prefix)
+    return
+  }
+  for (const child of children) {
+    findRepoRoots(path.join(dir, child), prefix ? `${prefix}/${child}` : child, out)
+  }
+}
+
+/**
+ * Every repo key that has locally stored sessions. Machine-local repos live
+ * under `_local/` and are returned as `_local/<path-key>`.
+ */
+export function listRepoKeys(baseDir?: string): string[] {
+  const sessionsRoot = path.join(boonsDataDir(baseDir), SESSIONS_DIR_NAME)
+  const keys: string[] = []
+  findRepoRoots(sessionsRoot, "", keys)
+  return keys.sort()
+}
+
+/** Branch names (which may themselves contain slashes) for a repo key. */
+export function listBranches(repoKey: string, baseDir?: string): string[] {
+  const repoDir = getSessionsDirForKey(repoKey, baseDir)
+  const branches: string[] = []
+
+  const walk = (dir: string, prefix: string) => {
+    for (const child of childDirs(dir)) {
+      const childPath = path.join(dir, child)
+      const segment = prefix ? `${prefix}/${child}` : child
+      if (isBranchDir(childPath)) {
+        branches.push(segment)
+        continue
+      }
+      // Slash-containing branch: the session records the full name.
+      const recorded = descendantSessionBranch(childPath)
+      if (recorded && recorded.startsWith(`${segment}/`)) {
+        branches.push(recorded)
+        continue
+      }
+      walk(childPath, segment)
+    }
+  }
+  walk(repoDir, "")
+
+  return [...new Set(branches)].sort()
+}
+
+/**
+ * Resolve a `--repo` value (normalized key or raw remote URL) to the key that
+ * addresses stored sessions. `known` is false when no sessions have ever been
+ * saved for that key — the caller turns that into a "pull it first" hint.
+ */
+export function resolveRepoKey(
+  input: string,
+  baseDir?: string,
+): { key: string; known: boolean } {
+  const key = normalizeRepoKey(input)
+  return { key, known: isDirectory(getSessionsDirForKey(key, baseDir)) }
 }
 
 export function resolveConfig(cwd?: string): ResolvedConfig | null {

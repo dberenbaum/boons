@@ -64,6 +64,22 @@ const mockGetSessionsBranchDir = (branch: string) => {
   return path.join("/tmp", "boons-sessions", branch)
 }
 
+const mockNormalizeRepoKey = (input: string) => {
+  let url = input.trim()
+  const protoIdx = url.indexOf("://")
+  if (protoIdx >= 0) url = url.slice(protoIdx + 3)
+  const atIdx = url.indexOf("@")
+  if (atIdx >= 0) url = url.slice(atIdx + 1)
+  const firstSlash = url.indexOf("/")
+  const colonIdx = url.indexOf(":")
+  if (colonIdx >= 0 && (firstSlash < 0 || colonIdx < firstSlash)) {
+    url = url.slice(0, colonIdx) + "/" + url.slice(colonIdx + 1)
+  }
+  if (url.endsWith(".git")) url = url.slice(0, -4)
+  if (url.endsWith("/")) url = url.slice(0, -1)
+  return url
+}
+
 mock.module("../../src/cloud/config", () => ({
   resolveConfig: () => ({
     remote: {
@@ -76,7 +92,9 @@ mock.module("../../src/cloud/config", () => ({
   getRepoKey: () => "github.com/org/repo",
   getSessionsDir: () => pushTmpDir ? path.join(pushTmpDir, "sessions") : "/tmp/boons-sessions",
   getSessionsBranchDir: (branch: string) => mockGetSessionsBranchDir(branch),
-  boonsDataDir: () => pushTmpDir ? path.join(pushTmpDir, "boons") : "/tmp/boons",
+  getSessionsDirForKey: (repoKey: string) => path.join(pushTmpDir || "/tmp/boons", "sessions", repoKey),
+  getSessionsBranchDirForKey: (repoKey: string, branch: string) => path.join(pushTmpDir || "/tmp/boons", "sessions", repoKey, branch),
+  normalizeRepoKey: mockNormalizeRepoKey,
   getRepoKeyOrLocal: () => ({ key: "github.com/org/repo", isLocal: false }),
   readGlobalConfig: () => ({}),
   writeGlobalConfig: () => {},
@@ -186,6 +204,25 @@ describe("pull", () => {
     expect(result.sessions).toEqual(["sess-2"])
     expect(downloadedDirs.length).toBe(1)
   })
+
+  test("pulls another repo by key without a git remote", async () => {
+    downloadedDirs.length = 0
+    listedBases.length = 0
+    const result = await pull({ directory: tmpDir, repoKey: "github.com/org/other", branch: "main" })
+    expect(result.repoKey).toBe("github.com/org/other")
+    expect(result.branch).toBe("main")
+    expect(listedBases[0]).toContain("github.com/org/other/main")
+    // stored under the target repo key, not the cwd's repo
+    expect(downloadedDirs[0].localDir).toContain(path.join("github.com/org/other", "main"))
+  })
+
+  test("normalizes a raw remote URL passed to --repo", async () => {
+    downloadedDirs.length = 0
+    listedBases.length = 0
+    const result = await pull({ directory: tmpDir, repoKey: "git@github.com:org/third.git", branch: "main" })
+    expect(result.repoKey).toBe("github.com/org/third")
+    expect(listedBases[0]).toContain("github.com/org/third/main")
+  })
 })
 
 // ─── Remote List Tests ─────────────────────────────────────────
@@ -214,5 +251,12 @@ describe("listRemote", () => {
     expect(listedBases.length).toBe(1)
     expect(listedBases[0]).toContain("github.com/org/repo/feature-test")
     expect(listedBases[0]).toContain("boons")
+  })
+
+  test("lists another repo's remote sessions by key", async () => {
+    listedBases.length = 0
+    const sessions = await listRemote({ directory: "/tmp", repoKey: "github.com/org/infra", branch: "main" })
+    expect(sessions.length).toBe(2)
+    expect(listedBases[0]).toContain("github.com/org/infra/main")
   })
 })

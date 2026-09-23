@@ -1,6 +1,6 @@
 import * as path from "path"
 import * as os from "os"
-import { resolveConfig, getRepoKey } from "./config"
+import { resolveConfig, getRepoKeyOrLocal, normalizeRepoKey } from "./config"
 import { createProvider } from "./factory"
 import { getBranch } from "../git"
 
@@ -15,6 +15,7 @@ export interface RemoteSession {
 export interface ListRemoteOptions {
   branch?: string
   directory?: string
+  repoKey?: string
 }
 
 export async function listRemote(opts: ListRemoteOptions): Promise<RemoteSession[]> {
@@ -25,7 +26,9 @@ export async function listRemote(opts: ListRemoteOptions): Promise<RemoteSession
 
   const provider = createProvider(remote)
   const branch = opts.branch ?? getBranch(cwd)
-  const repoKey = getRepoKey(cwd) ?? ""
+  const repoKey = opts.repoKey
+    ? normalizeRepoKey(opts.repoKey)
+    : getRepoKeyOrLocal(cwd).key
   const remoteBase = path.posix.join(...[remote.prefix, repoKey, branch].filter(Boolean))
 
   const sessionIDs = await provider.listDirs(remoteBase)

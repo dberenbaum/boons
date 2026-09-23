@@ -48,6 +48,8 @@ Every session on a branch is saved into `~/.boons/sessions/<repo-key>/<branch>/<
 
 Your agent auto-saves at meaningful checkpoints: after a git commit, when you wrap up a task, or every ~15 messages of real work. No need to remember. Optional `plan.md` and `decisions.md` add richer context for future readers.
 
+Because everything lives on your machine keyed by repo, context spans repos: `boons plan --all-repos` searches every repo you've worked in, so a plan written in one repo is findable from any other. See [Cross-repo discovery](#cross-repo-discovery).
+
 When you want to share, sessions sync to a shared cloud bucket. When you want to understand someone else's work, your agent pulls and reads their sessions for you.
 
 What differentiates this from other session persistence tools is provenance —
@@ -104,6 +106,8 @@ Once boons is installed, your agent handles the mechanics automatically:
 - **Pull on branch switch** — When switching to a branch with saved sessions, your agent suggests loading them.
 - **PR context** — When drafting or reviewing a PR, your agent loads session context to ground the description or review in the decision history.
 - **Query on demand** — "What did we decide about X?" Your agent searches the session history.
+- **Cross-repo context** — When the task involves another repo or the local branch is thin, your agent searches every repo (`boons plan --all-repos`, `boons ls --all-repos`) instead of asking you where to look.
+- **Plans saved to boons** — Your agent saves plans and specs with `boons plan set` / `session-save --file`, which is what makes them findable in the next session — and in other repos.
 - **Project commands** — When discovering build, test, or deploy commands, your agent saves them as task scripts with `boons task create`. Before running project commands, it checks `boons task list` first.
 - **Worktree coordination** — When operating in a git worktree, the agent runs `boons worktree register` to allocate unique ports and `boons worktree unregister` on cleanup. Task scripts automatically receive the allocated ports in their environment.
 
@@ -159,6 +163,12 @@ task scripts live in `~/.boons/tasks/` and worktree port registries in
 `~/.boons/worktrees/` — because how to build and run the project is independent
 of any single session or tool.
 
+**Organize by scope, not by location.** A plan's home repo is an accident of where the
+conversation happened. Scoping reads by repo makes that accident load-bearing: agents
+search only where they happen to be and never find the plan that lives next door. Search
+therefore takes a scope — current branch by default, a named repo with `--repo`, or every
+repo on the machine with `--all-repos` — while storage stays exactly as git scopes it.
+
 ## Supported Tools
 
 | Tool | Integration | Session Source |
@@ -187,12 +197,17 @@ boons session-save --tool <name> --summary <text>      Save session for current 
   [--session-id <id>] [--file <path>...]
 boons plan [<name>] [--branch <b>] [--all] [--json]    List plans, or print latest content of one
 boons plan set --name <name> (--file <path> | --text)  Update a plan without resummarizing the session
+boons plan [<name>] --repo <key|url> [--branch <b>]    Read plans from another repo
+boons plan [<name>] --all-repos [--branch <b>]         Search plans across every local repo
 boons ls [--branch <name>] [--json]                    List saved sessions
+boons ls [--repo <key|url>] [--all-repos] [--json]    List sessions of another repo / all repos
 boons ls --remote [--branch <name>] [--json]           List remote sessions
+boons ls --remote [--repo <key|url>] [--branch <name>]  List another repo's remote sessions
 boons install [<tool>] [--project]                     Install skills (auto-detects if no tool specified)
 boons remote [--provider aws|gcp|azure ...]            Configure remote
 boons push [--session-id <id>] [--branch <b>]          Push sessions to cloud
 boons pull [--session-id <id>] [--branch <b>]          Pull from cloud
+boons pull [--repo <key|url>] [--branch <b>]           Pull another repo's sessions locally
 boons task [<name>] [--verbose] [-- <args>]            Run a task script (default: setup.sh)
 boons task list                                        List available task scripts
 boons task check                                       Print all task scripts without running
@@ -230,6 +245,37 @@ snapshots keyed by the current branch:
 `boons plan set` writes into the most recent session dir for the branch (creating a plan-only
 dir if no session exists yet). Pushing a branch also syncs plans to cloud, so teammates who
 `boons pull` get the current plan too.
+
+## Cross-repo discovery
+
+Plans and sessions are stored per repo, but most real work spans repos — coordinating a
+migration, a shared protocol, a cross-cutting feature. Because sessions live on your machine
+under `~/.boons/sessions/<repo-key>/`, a plan saved while working in one repo is already
+readable from every other. What's missing is discovery, so boons searches everywhere:
+
+- `boons plan --all-repos` — every plan stored on this machine, newest first, with repo and
+  branch columns
+- `boons plan <name> --all-repos` — find a plan by name anywhere on this machine
+- `boons ls --all-repos` — sessions across all repos
+- `boons plan --repo <key|url> [--branch <b>]` and `boons ls --repo <key|url>` — target one
+  repo, where the key is `host/org/repo` or a raw remote URL
+
+If a plan isn't on the current branch, `boons plan <name>` tells you which repo and branch hold
+it and prints the exact command to read it. This search is local — nothing is copied between
+repos, and no plan needs a home repo. Cross-machine data arrives the same way as before:
+
+```sh
+boons ls --remote --repo github.com/org/infra --branch main   # see what's there
+boons pull --repo github.com/org/infra --branch main          # fetch it, then search locally
+```
+
+Two consequences worth knowing:
+
+- **Save plans to boons, not just the working tree.** A `plan.md` that only exists in a
+  checkout is invisible to `boons plan` and to cross-repo search. Use `boons plan set` or
+  `session-save --file` so the plan is tracked.
+- **A plan's home repo doesn't matter.** Name it for what it covers (`auth-rollout.md`) and
+  agents in sibling repos will find it with `boons plan auth-rollout.md --all-repos`.
 
 ## Prerequisites
 

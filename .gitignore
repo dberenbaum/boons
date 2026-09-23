@@ -1,5 +1,8 @@
 node_modules/
 
+# bun transpiler cache
+.bun/
+
 # project-scoped agent skills (use `boons install <tool>` globally instead)
 .opencode/skills/
 .claude/skills/

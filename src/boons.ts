@@ -918,9 +918,8 @@ const BOONS_BLOCK = [
   "`boons task create <name> --command \"<cmd>\"` after running the command.",
   "",
   "Also available: boons-session-load (prior context), boons-session-push (share",
-  "to cloud), boons-session-pull (fetch from cloud), boons-pr-draft (PR",
-  "descriptions), boons-pr-review (PR reviews), boons-task (project task runner),",
-  "boons-worktree (worktree port coordination).",
+  "to cloud), boons-session-pull (fetch from cloud), boons-task (project task",
+  "runner), boons-worktree (worktree port coordination).",
   "",
   "Context may span repos: `boons plan --all-repos` and `boons ls --all-repos`",
   "search every repo stored on this machine, and `--repo <key|url>` targets one.",
@@ -1223,7 +1222,7 @@ for all artifacts related to a session.
 function loadSkillContent(t: ToolInfo): string {
   return `---
 name: boons-session-load
-description: Load prior context on branch switch, before new features, or when drafting PRs. Read saved session summaries.
+description: Load prior context on branch switch, before new features, or when starting a new task. Read saved session summaries.
 ---
 
 ## What this does
@@ -1332,30 +1331,6 @@ When the user begins describing a new task or feature to work on:
    slate. Reference prior decisions and open questions so the work
    feels continuous.
 
-### Drafting a PR description
-
-When asked to draft or help write a PR description:
-
-1. Run \`boons ls [--branch <name>]\` to discover all sessions
-2. Read \`summary.md\` and \`decisions.md\` from every session
-3. Cross-reference decisions across sessions to identify what was
-   settled and what changed direction midstream
-4. Collect all open questions and uncertainties from summaries
-5. Draft a PR with sections: what changed, why, key decisions made,
-   alternatives considered, open questions
-
-### Reviewing or understanding a branch
-
-When asked to review a branch or understand someone else's work:
-
-1. Run \`boons ls [--branch <name>]\` for the branch
-2. Read all summaries to get the narrative arc of the branch — how
-   the code evolved across sessions, not just the final state
-3. For sessions that mention specific design decisions, read
-   \`decisions.md\`
-4. Generate a synthesis: overall purpose, what was built, design
-   decisions with rationale, open questions
-
 ### Finding specific context
 
 When the user asks about a specific feature, bug, or decision:
@@ -1378,7 +1353,7 @@ as the starting point.
 function pushSkillContent(t: ToolInfo): string {
   return `---
 name: boons-session-push
-description: Ask to share after auto-save, before git push, or before PR review. Push sessions to cloud. Always ask user.
+description: Ask to share after auto-save, before git push. Push sessions to cloud. Always ask user.
 ---
 
 ## What this does
@@ -1393,7 +1368,6 @@ Run \`boons push\` when:
 - The user explicitly asks to share or push sessions
 - **After auto-saving a session** — ask if they want to push this to the team
 - Before pushing to the remote repository — ask the user
-- Before creating or marking a PR as ready for review — ask the user
 
 **Always ask the user before running** — this shares session data with others.
 ## Before first push
@@ -1420,13 +1394,13 @@ whatever is in the local session directory.
 function pullSkillContent(t: ToolInfo): string {
   return `---
 name: boons-session-pull
-description: Fetch remote context after git pull or before code review. Pull sessions from cloud.
+description: Fetch remote context after git pull. Pull sessions from cloud.
 ---
 
 ## What this does
 
 Downloads session artifacts for the current branch from the configured
-cloud bucket. This is how a collaborator or reviewer fetches context
+cloud bucket. This is how a collaborator fetches context
 created by others.
 
 ## When to use this
@@ -1434,7 +1408,6 @@ created by others.
 Run \`boons pull\` when:
 - The user explicitly asks to fetch remote sessions
 - After pulling from the remote repository — suggest it
-- Before reviewing work on a branch — suggest fetching context from collaborators
 
 ## Workflow
 
@@ -1448,78 +1421,6 @@ Run \`boons pull\` when:
 \`boons pull\` pulls all sessions for the current branch by default. Use the
 \`--branch\` argument to pull sessions from a different branch context, or
   \`--session-id\` to pull a specific session.
-`
-}
-
-function prDraftSkillContent(t: ToolInfo): string {
-  return `---
-name: boons-pr-draft
-description: When drafting a PR, load boons session context from the branch to ground the description in session history.
----
-
-## What this does
-
-Guides the agent to use boons session artifacts when drafting a PR,
-so the description reflects the full narrative arc — not just the diff.
-
-## Protocol
-
-When the user asks you to draft a PR, create a PR, or write a PR description:
-
-1. **Discover sessions** — run \`boons ls [--branch <name>]\` for the branch
-   (defaults to current branch)
-2. **Load context** — read \`summary.md\` from every session, and use
-   \`boons plan [--branch <name>]\` to get the latest plan and decisions docs
-3. **Cross-reference** — identify what was settled, what changed direction
-   midstream, and what's still open
-4. **Draft** — produce a PR description with sections: what changed, why,
-   key decisions with rationale, alternatives considered, open questions
-5. **Present to the user** — do not post the PR automatically. Let the user
-   review and edit the draft.
-
-## Relationship to session-load
-
-This skill activates the "Drafting a PR description" protocol from the
-boons-session-load skill. Refer to boons-session-load for the full
-context-loading workflow.
-`
-}
-
-function prReviewSkillContent(t: ToolInfo): string {
-  return `---
-name: boons-pr-review
-description: When reviewing a PR or branch, load boons context to understand the intent behind changes.
----
-
-## What this does
-
-Guides the agent to load boons session context before reviewing code,
-so the review evaluates intent vs. execution — not just line-level
-correctness.
-
-## Protocol
-
-When the user asks you to review a PR, review a branch, or understand
-someone else's work:
-
-1. **Fetch context** — if the branch has remote sessions, suggest
-   \`boons pull\` to fetch them first
-2. **Discover sessions** — run \`boons ls [--branch <name>]\` for the branch
-3. **Load context** — read \`summary.md\` from every session, and use
-   \`boons plan [--branch <name>]\` to get the latest plan and decisions docs
-4. **Synthesize** — understand the overall purpose, what was built, design
-   rationale, and open questions
-5. **Review the diff** — examine the actual code changes with that context.
-   Flag places where the implementation diverges from the plan or where
-   intent is unclear
-6. **Present the review to the user** — do not post it automatically via
-   \`gh pr review\`. Let the user decide when and how to share.
-
-## Relationship to session-load
-
-This skill activates the "Reviewing or understanding a branch" protocol
-from the boons-session-load skill. Refer to boons-session-load for the full
-context-loading workflow.
 `
 }
 
@@ -1857,8 +1758,6 @@ async function writeSkills(t: ToolInfo, rootDir: string) {
     { name: "boons-session-load", content: loadSkillContent(t) },
     { name: "boons-session-push", content: pushSkillContent(t) },
     { name: "boons-session-pull", content: pullSkillContent(t) },
-    { name: "boons-pr-draft", content: prDraftSkillContent(t) },
-    { name: "boons-pr-review", content: prReviewSkillContent(t) },
     { name: "boons-task", content: taskSkillContent() },
     { name: "boons-worktree", content: worktreeSkillContent(t) },
   ]
